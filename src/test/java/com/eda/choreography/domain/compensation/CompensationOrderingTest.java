@@ -47,6 +47,28 @@ class CompensationOrderingTest {
         assertThat(order.sequence()).hasSize(4).last().isEqualTo(a);
     }
 
+    @Test
+    void failedBranchLeavesOnlySuccessfulSiblingsThenTheForkingStep() {
+        var a = done("A");
+        var b = done("B", "A");
+        var c = done("C", "A");
+        var d = failed("D", "A");
+
+        var order = orderOf(a, b, c, d);
+
+        assertThat(order.stages()).containsExactly(Set.of(b, c), Set.of(a));
+        assertThat(order.sequence()).doesNotContain(d);
+    }
+
+    @Test
+    void failedBranchThatLeftNoTraceEntryGivesTheSameOrder() {
+        var a = done("A");
+        var b = done("B", "A");
+        var c = done("C", "A");
+
+        assertThat(orderOf(a, b, c).stages()).containsExactly(Set.of(b, c), Set.of(a));
+    }
+
     // ---- joins, uneven branches, and the general rule -----------------------------------
 
     @Test
@@ -77,10 +99,33 @@ class CompensationOrderingTest {
         assertThat(order.sequence().indexOf(b2)).isLessThan(order.sequence().indexOf(b));
     }
 
+    @Test
+    void failureAfterTheForkUndoesSiblingsThenEveryPreForkStep() {
+        // P -> Q -> fork(B, C, D); D fails. Undo {B, C}, then Q, then P.
+        var p = done("P");
+        var q = done("Q", "P");
+        var b = done("B", "Q");
+        var c = done("C", "Q");
+        var d = failed("D", "Q");
+
+        assertThat(orderOf(p, q, b, c, d).stages())
+                .containsExactly(Set.of(b, c), Set.of(q), Set.of(p));
+    }
+
+    @Test
+    void emptyTraceAndAllFailedTraceHaveNothingToUndo() {
+        assertThat(CompensationOrdering.of(TraceGraph.of(List.of())).isEmpty()).isTrue();
+        assertThat(orderOf(failed("A")).isEmpty()).isTrue();
+    }
+
     // ---- helpers -----------------------------------------------------------------------
 
     private static TraceEntry done(String id, String... parents) {
         return TraceEntry.completed(id, CORRELATION, "svc-" + id, "result-" + id, parents);
+    }
+
+    private static TraceEntry failed(String id, String... parents) {
+        return TraceEntry.failed(id, CORRELATION, "svc-" + id, parents);
     }
 
     /** Orders the trace and checks the general invariant on the result before returning it. */
@@ -93,12 +138,13 @@ class CompensationOrderingTest {
 
     /**
      * The definition of a correct compensation order, independent of any scenario: every entry
-     * appears exactly once, and each entry is undone only after all of its descendants, which
-     * sit in strictly earlier stages.
+     * that needs compensation appears exactly once, nothing else appears, and each entry is
+     * undone only after all of its compensable descendants, which sit in strictly earlier stages.
      */
     private static void assertDescendantsUndoneFirst(TraceGraph graph, CompensationOrder order) {
         var sequence = order.sequence();
-        assertThat(sequence).containsExactlyInAnyOrderElementsOf(graph.entries());
+        var expected = graph.entries().stream().filter(TraceEntry::needsCompensation).toList();
+        assertThat(sequence).containsExactlyInAnyOrderElementsOf(expected);
 
         var stageOf = new java.util.HashMap<TraceEntry, Integer>();
         for (int i = 0; i < order.stages().size(); i++) {
@@ -109,10 +155,12 @@ class CompensationOrderingTest {
         }
         for (var entry : sequence) {
             for (var descendant : descendantsOf(graph, entry)) {
-                assertThat(stageOf.get(descendant))
-                        .as("%s must be undone in an earlier stage than its ancestor %s",
-                                descendant.id(), entry.id())
-                        .isLessThan(stageOf.get(entry));
+                if (descendant.needsCompensation()) {
+                    assertThat(stageOf.get(descendant))
+                            .as("%s must be undone in an earlier stage than its ancestor %s",
+                                    descendant.id(), entry.id())
+                            .isLessThan(stageOf.get(entry));
+                }
             }
         }
     }

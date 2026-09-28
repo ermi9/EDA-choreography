@@ -18,6 +18,9 @@ import java.util.Set;
  * wave only once all of its children have been placed. So a forking step waits for every
  * branch, a join is undone before the branches that fed it, and sibling branches that become
  * ready together share a stage with no order between them.
+ *
+ * <p>Failed entries take part in the ordering (they are nodes of the graph) but are left out
+ * of the stages: a failed step committed nothing, so there is nothing to undo.
  */
 public final class CompensationOrdering {
 
@@ -53,10 +56,11 @@ public final class CompensationOrdering {
         return new CompensationOrder(stages);
     }
 
-    /** The wave's entries in id order so logs and replays are reproducible. */
+    /** The wave's entries that need undoing, in id order so logs and replays are reproducible. */
     private static Set<TraceEntry> compensable(List<TraceEntry> wave) {
         var stage = new LinkedHashSet<TraceEntry>();
         wave.stream()
+                .filter(TraceEntry::needsCompensation)
                 .sorted(Comparator.comparing(TraceEntry::id))
                 .forEach(stage::add);
         return Collections.unmodifiableSet(stage);

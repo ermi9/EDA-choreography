@@ -9,7 +9,8 @@ import java.util.Set;
  *
  * <p>Entries inside one stage have no ordering constraint between them (siblings of a fork)
  * and may be compensated in any order or concurrently. Every entry of stage {@code n} must be
- * compensated before any entry of stage {@code n + 1}.
+ * compensated before any entry of stage {@code n + 1}. Only entries that
+ * {@link TraceEntry#needsCompensation() need compensation} appear.
  */
 public record CompensationOrder(List<Set<TraceEntry>> stages) {
 
