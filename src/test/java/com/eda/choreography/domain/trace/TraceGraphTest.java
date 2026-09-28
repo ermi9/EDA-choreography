@@ -86,6 +86,17 @@ class TraceGraphTest {
                 .hasMessageContaining("corr-2");
     }
 
+    @Test
+    void rejectsACycle() {
+        var a = done("A", "C");
+        var b = done("B", "A");
+        var c = done("C", "B");
+
+        assertThatThrownBy(() -> TraceGraph.of(List.of(a, b, c)))
+                .isInstanceOf(MalformedTraceException.class)
+                .hasMessageContaining("cycle");
+    }
+
     private static TraceEntry done(String id, String... parents) {
         return TraceEntry.completed(id, CORRELATION, "svc-" + id, "result-" + id, parents);
     }

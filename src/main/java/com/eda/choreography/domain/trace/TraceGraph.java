@@ -1,7 +1,9 @@
 package com.eda.choreography.domain.trace;
 
+import java.util.ArrayDeque;
 import java.util.Collection;
 import java.util.Comparator;
+import java.util.Deque;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -17,8 +19,10 @@ import java.util.stream.Collectors;
  * indexed first and edges drawn afterwards, so a child may arrive before the parent it names.
  * Identical duplicates collapse (at a join, every branch trace carries the shared ancestors).
  *
- * <p>Rejected with {@link MalformedTraceException}: a parent missing from the trace, entries
- * from different instances, and two different entries sharing an id.
+ * <p>A constructed graph is guaranteed well-formed: every parent is present, all entries share
+ * one correlation id, ids are unique, and there is no cycle. Anything else is rejected with
+ * {@link MalformedTraceException} rather than repaired, because a compensation order derived
+ * from a guessed trace could undo steps in the wrong order.
  */
 public final class TraceGraph {
 
@@ -45,7 +49,9 @@ public final class TraceGraph {
                 children.computeIfAbsent(parentId, id -> new LinkedHashSet<>()).add(entry);
             }
         }
-        return new TraceGraph(byId, children);
+        var graph = new TraceGraph(byId, children);
+        graph.requireAcyclic();
+        return graph;
     }
 
     /** The instance this trace belongs to; empty only for an empty trace. */
@@ -93,4 +99,33 @@ public final class TraceGraph {
         return byId;
     }
 
+    /** Kahn's algorithm forward from the roots; anything never reached lies on a cycle. */
+    private void requireAcyclic() {
+        var pendingParents = new HashMap<String, Integer>();
+        Deque<String> ready = new ArrayDeque<>();
+        for (var entry : byId.values()) {
+            pendingParents.put(entry.id(), entry.parents().size());
+            if (entry.parents().isEmpty()) {
+                ready.add(entry.id());
+            }
+        }
+        int visited = 0;
+        while (!ready.isEmpty()) {
+            var id = ready.poll();
+            visited++;
+            for (var child : children.getOrDefault(id, Set.of())) {
+                if (pendingParents.merge(child.id(), -1, Integer::sum) == 0) {
+                    ready.add(child.id());
+                }
+            }
+        }
+        if (visited != byId.size()) {
+            var onCycle = pendingParents.entrySet().stream()
+                    .filter(e -> e.getValue() > 0)
+                    .map(Map.Entry::getKey)
+                    .sorted()
+                    .toList();
+            throw new MalformedTraceException("trace contains a cycle; entries on or behind it: " + onCycle);
+        }
+    }
 }
