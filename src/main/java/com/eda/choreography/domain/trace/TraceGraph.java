@@ -16,6 +16,9 @@ import java.util.stream.Collectors;
  * <p>Built from a flat collection of {@link TraceEntry entries} in any order: all entries are
  * indexed first and edges drawn afterwards, so a child may arrive before the parent it names.
  * Identical duplicates collapse (at a join, every branch trace carries the shared ancestors).
+ *
+ * <p>Rejected with {@link MalformedTraceException}: entries from different instances, and two
+ * different entries sharing an id.
  */
 public final class TraceGraph {
 
@@ -69,8 +72,19 @@ public final class TraceGraph {
 
     private static Map<String, TraceEntry> index(Collection<TraceEntry> entries) {
         var byId = new LinkedHashMap<String, TraceEntry>();
+        String correlationId = null;
         for (var entry : entries.stream().sorted(BY_ID).toList()) {
-            byId.putIfAbsent(entry.id(), entry);
+            if (correlationId == null) {
+                correlationId = entry.correlationId();
+            } else if (!correlationId.equals(entry.correlationId())) {
+                throw new MalformedTraceException("trace mixes instances " + correlationId
+                        + " and " + entry.correlationId() + " (entry " + entry.id() + ")");
+            }
+            var previous = byId.putIfAbsent(entry.id(), entry);
+            if (previous != null && !previous.equals(entry)) {
+                throw new MalformedTraceException(
+                        "two different entries share id " + entry.id() + ": " + previous + " vs " + entry);
+            }
         }
         return byId;
     }
