@@ -70,6 +70,13 @@ class TraceGraphTest {
     }
 
     @Test
+    void rejectsAParentThatIsNeverDefined() {
+        assertThatThrownBy(() -> TraceGraph.of(List.of(done("B", "ghost"))))
+                .isInstanceOf(MalformedTraceException.class)
+                .hasMessageContaining("ghost");
+    }
+
+    @Test
     void rejectsEntriesFromDifferentInstances() {
         var mine = done("A");
         var theirs = TraceEntry.completed("B", "corr-2", "svc-B", "r", "A");

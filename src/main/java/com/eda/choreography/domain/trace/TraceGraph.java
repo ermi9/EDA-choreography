@@ -17,8 +17,8 @@ import java.util.stream.Collectors;
  * indexed first and edges drawn afterwards, so a child may arrive before the parent it names.
  * Identical duplicates collapse (at a join, every branch trace carries the shared ancestors).
  *
- * <p>Rejected with {@link MalformedTraceException}: entries from different instances, and two
- * different entries sharing an id.
+ * <p>Rejected with {@link MalformedTraceException}: a parent missing from the trace, entries
+ * from different instances, and two different entries sharing an id.
  */
 public final class TraceGraph {
 
@@ -38,6 +38,10 @@ public final class TraceGraph {
         var children = new HashMap<String, Set<TraceEntry>>();
         for (var entry : byId.values()) {
             for (var parentId : entry.parents()) {
+                if (!byId.containsKey(parentId)) {
+                    throw new MalformedTraceException(
+                            "entry " + entry.id() + " names parent " + parentId + " which is not in the trace");
+                }
                 children.computeIfAbsent(parentId, id -> new LinkedHashSet<>()).add(entry);
             }
         }
