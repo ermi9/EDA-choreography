@@ -25,7 +25,12 @@ public record TraceEntry(
         Outcome outcome,
         String resultRef) {
 
-    /** Whether a step's effect happened. Only {@link #COMPLETED} steps have anything to undo. */
+    /**
+     * Whether a step's effect happened. Only {@link #COMPLETED} steps have anything to undo.
+     *
+     * <p>Scope boundary: steps are assumed atomic, so {@link #FAILED} means no side effect was
+     * committed. A step that fails after a partial side effect is outside this model.
+     */
     public enum Outcome {
         COMPLETED,
         FAILED
