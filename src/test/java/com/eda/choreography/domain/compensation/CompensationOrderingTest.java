@@ -5,9 +5,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.eda.choreography.domain.trace.TraceEntry;
 import com.eda.choreography.domain.trace.TraceGraph;
 import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Deque;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Random;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
 
@@ -110,6 +113,22 @@ class CompensationOrderingTest {
 
         assertThat(orderOf(p, q, b, c, d).stages())
                 .containsExactly(Set.of(b, c), Set.of(q), Set.of(p));
+    }
+
+    @Test
+    void orderDoesNotDependOnTheOrderEntriesArrivedIn() {
+        var entries = new ArrayList<>(List.of(
+                done("A"), done("B", "A"), done("C", "A"), failed("D", "A"),
+                done("J", "B", "C"), done("K", "J")));
+        var expected = CompensationOrdering.of(TraceGraph.of(entries)).stages();
+
+        var random = new Random(42);
+        for (int i = 0; i < 50; i++) {
+            Collections.shuffle(entries, random);
+            assertThat(CompensationOrdering.of(TraceGraph.of(entries)).stages())
+                    .as("shuffle %d: %s", i, entries)
+                    .isEqualTo(expected);
+        }
     }
 
     @Test
