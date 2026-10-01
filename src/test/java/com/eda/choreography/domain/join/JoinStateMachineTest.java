@@ -1,6 +1,7 @@
 package com.eda.choreography.domain.join;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.eda.choreography.domain.join.JoinOutcome.Decision;
 import java.util.ArrayList;
@@ -101,6 +102,34 @@ class JoinStateMachineTest {
 
         assertThat(atSecondJoin.decision()).isEqualTo(Decision.WAITING);
         assertThat(atSecondJoin.state().arrivedBranches()).containsExactly("C");
+    }
+
+    @Test
+    void rejectsAnExtraDistinctBranchAfterTheJoinIsFull() {
+        arrive("B", 2);
+        arrive("C", 2);
+
+        assertThatThrownBy(() -> arrive("D", 2))
+                .isInstanceOf(JoinProtocolException.class)
+                .hasMessageContaining("expected 2");
+    }
+
+    @Test
+    void rejectsBranchesThatDisagreeOnHowManyAreExpected() {
+        arrive("B", 3);
+
+        assertThatThrownBy(() -> arrive("C", 2))
+                .isInstanceOf(JoinProtocolException.class)
+                .hasMessageContaining("expectedBranches");
+    }
+
+    @Test
+    void rejectedArrivalLeavesTheJoinUnchanged() {
+        arrive("B", 3);
+        assertThatThrownBy(() -> arrive("C", 2)).isInstanceOf(JoinProtocolException.class);
+
+        assertThat(arrive("C", 3).decision()).isEqualTo(Decision.WAITING);
+        assertThat(arrive("D", 3).fired()).isTrue();
     }
 
     private JoinOutcome arrive(String branchId, int expected) {

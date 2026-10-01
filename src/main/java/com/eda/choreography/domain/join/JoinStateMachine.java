@@ -16,10 +16,21 @@ public final class JoinStateMachine {
         this.store = store;
     }
 
-    /** Records one arrival and reports what it did. */
+    /**
+     * Records one arrival and reports what it did.
+     *
+     * @throws JoinProtocolException if the arrival disagrees with the join on how many branches
+     *     are expected, or is a new branch for a join that already has them all; the stored state
+     *     is left unchanged
+     */
     public JoinOutcome arrive(BranchArrival arrival) {
         var state = store.find(arrival.key())
                 .orElseGet(() -> JoinState.open(arrival.key(), arrival.expectedBranches()));
+        if (state.expectedBranches() != arrival.expectedBranches()) {
+            throw new JoinProtocolException("join " + arrival.key() + " expects " + state.expectedBranches()
+                    + " branches but branch " + arrival.branchId() + " says expectedBranches="
+                    + arrival.expectedBranches());
+        }
         if (state.arrivedBranches().contains(arrival.branchId())) {
             return new JoinOutcome(Decision.DUPLICATE, state);
         }
