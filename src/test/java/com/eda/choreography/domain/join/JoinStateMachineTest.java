@@ -9,7 +9,7 @@ import org.junit.jupiter.api.Test;
 
 /**
  * The INC-2 exit tests: a join fires exactly once when all branches have arrived, whatever the
- * order.
+ * order, and duplicates never make it fire early or fire again.
  */
 class JoinStateMachineTest {
 
@@ -43,11 +43,42 @@ class JoinStateMachineTest {
     }
 
     @Test
+    void duplicateDoesNotMakeTheJoinFireEarly() {
+        arrive("B", 3);
+        var repeat = arrive("B", 3);
+        var second = arrive("C", 3);
+
+        assertThat(repeat.decision()).isEqualTo(Decision.DUPLICATE);
+        assertThat(second.decision()).isEqualTo(Decision.WAITING);
+        assertThat(second.state().arrivedBranches()).containsExactlyInAnyOrder("B", "C");
+        assertThat(arrive("D", 3).fired()).isTrue();
+    }
+
+    @Test
     void incompleteJoinNeverFires() {
         var outcomes = List.of(arrive("B", 3), arrive("C", 3), arrive("C", 3), arrive("B", 3));
 
         assertThat(outcomes).noneMatch(JoinOutcome::fired);
         assertThat(outcomes.get(outcomes.size() - 1).state().fired()).isFalse();
+    }
+
+    @Test
+    void duplicateAfterFiringDoesNotFireAgain() {
+        arrive("B", 2);
+        assertThat(arrive("C", 2).fired()).isTrue();
+
+        var lateB = arrive("B", 2);
+        var lateC = arrive("C", 2);
+
+        assertThat(lateB.decision()).isEqualTo(Decision.DUPLICATE);
+        assertThat(lateC.decision()).isEqualTo(Decision.DUPLICATE);
+        assertThat(lateC.state().fired()).isTrue();
+    }
+
+    @Test
+    void singleBranchJoinFiresOnItsOnlyArrival() {
+        assertThat(arrive("B", 1).fired()).isTrue();
+        assertThat(arrive("B", 1).decision()).isEqualTo(Decision.DUPLICATE);
     }
 
     @Test

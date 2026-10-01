@@ -12,7 +12,9 @@ public record JoinOutcome(Decision decision, JoinState state) {
         /** The arrival was new, but other branches are still outstanding. */
         WAITING,
         /** The arrival completed the join. Reported exactly once per join. */
-        FIRED
+        FIRED,
+        /** This branch had already arrived; nothing changed. */
+        DUPLICATE
     }
 
     public boolean fired() {

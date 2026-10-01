@@ -6,7 +6,7 @@ import com.eda.choreography.domain.join.JoinOutcome.Decision;
  * Applies branch arrivals to joins and decides when a join fires.
  *
  * <p>A join fires exactly once: when the set of distinct arrived branches first reaches
- * {@code expectedBranches}.
+ * {@code expectedBranches}. Duplicates, before or after firing, change nothing.
  */
 public final class JoinStateMachine {
 
@@ -20,6 +20,10 @@ public final class JoinStateMachine {
     public JoinOutcome arrive(BranchArrival arrival) {
         var state = store.find(arrival.key())
                 .orElseGet(() -> JoinState.open(arrival.key(), arrival.expectedBranches()));
+        if (state.arrivedBranches().contains(arrival.branchId())) {
+            return new JoinOutcome(Decision.DUPLICATE, state);
+        }
+
         var next = state.withArrival(arrival.branchId());
         if (next.isComplete()) {
             next = next.markFired();
