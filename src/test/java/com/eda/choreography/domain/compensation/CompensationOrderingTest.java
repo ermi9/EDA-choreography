@@ -23,7 +23,7 @@ class CompensationOrderingTest {
 
     private static final String CORRELATION = "corr-1";
 
-    // ---- the plan's required scenarios -------------------------------------------------
+    // The scenarios the plan requires.
 
     @Test
     void linearTraceIsUndoneInReverse() {
@@ -72,7 +72,7 @@ class CompensationOrderingTest {
         assertThat(orderOf(a, b, c).stages()).containsExactly(Set.of(b, c), Set.of(a));
     }
 
-    // ---- joins, uneven branches, and the general rule -----------------------------------
+    // Joins, uneven branches, and the general rule.
 
     @Test
     void joinIsUndoneBeforeEitherOfItsBranches() {
@@ -136,8 +136,6 @@ class CompensationOrderingTest {
         assertThat(CompensationOrdering.of(TraceGraph.of(List.of())).isEmpty()).isTrue();
         assertThat(orderOf(failed("A")).isEmpty()).isTrue();
     }
-
-    // ---- helpers -----------------------------------------------------------------------
 
     private static TraceEntry done(String id, String... parents) {
         return TraceEntry.completed(id, CORRELATION, "svc-" + id, "result-" + id, parents);
