@@ -52,10 +52,25 @@ class TraceGraphTest {
     }
 
     @Test
+    void leavesAreTheEntriesNothingFollowsYet() {
+        var a = done("A");
+        var b = done("B", "A");
+        var c = done("C", "A");
+
+        assertThat(TraceGraph.of(List.of(a)).leaves()).containsExactly(a);
+        assertThat(TraceGraph.of(List.of(a, b)).leaves()).containsExactly(b);
+        // After a fork both branch ends are open; a join takes them as its parents.
+        assertThat(TraceGraph.of(List.of(c, b, a)).leaves()).containsExactlyInAnyOrder(b, c);
+        assertThat(TraceGraph.of(List.of(a, b, c, done("J", "B", "C"))).leaves()).extracting(TraceEntry::id)
+                .containsExactly("J");
+    }
+
+    @Test
     void emptyTraceIsAValidGraphWithNoInstance() {
         var graph = TraceGraph.of(List.of());
 
         assertThat(graph.entries()).isEmpty();
+        assertThat(graph.leaves()).isEmpty();
         assertThat(graph.correlationId()).isEmpty();
     }
 

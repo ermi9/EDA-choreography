@@ -63,6 +63,16 @@ public final class TraceGraph {
         return Set.copyOf(byId.values());
     }
 
+    /**
+     * The entries no other entry names as a parent: where the instance currently stands. One
+     * entry on a linear path, every open branch end after a fork, empty for an empty trace.
+     */
+    public Set<TraceEntry> leaves() {
+        return byId.values().stream()
+                .filter(entry -> !children.containsKey(entry.id()))
+                .collect(Collectors.toUnmodifiableSet());
+    }
+
     public Set<TraceEntry> parentsOf(String id) {
         return require(id).parents().stream().map(byId::get).collect(Collectors.toUnmodifiableSet());
     }
