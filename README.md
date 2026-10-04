@@ -26,9 +26,11 @@ com.eda.choreography
 ├── domain/          pure Java — no Kafka, Redis, or Spring (enforced by ArchitectureTest)
 │   ├── trace/         execution trace as a DAG                       (INC-1)
 │   ├── compensation/  reverse-topological compensation walk          (INC-1)
-│   └── join/          set-based join behind JoinStateStore           (INC-2)
+│   ├── join/          set-based join behind JoinStateStore           (INC-2)
+│   ├── message/       the message: correlation id, trace, results    (INC-3)
+│   └── step/          one step's loop and its ports                  (INC-3)
 └── infra/           adapters that call into the domain
-    ├── kafka/         consume → domain → publish loop                (INC-3)
+    ├── kafka/         JSON wire format, publisher, step listeners    (INC-3)
     └── redis/         durable JoinStateStore + join deadlines        (INC-4)
 ```
 
