@@ -18,7 +18,7 @@ class KafkaMessagePublisherTest {
 
     private static final String COMPLETED_TOPIC = "choreography.completed";
 
-    private final ChoreographyMessage message = ChoreographyMessage.start("order-42", "checkout").recordStep("A", Map.of("quantity", 10));
+    private final ChoreographyMessage message = ChoreographyMessage.start("order-42", "checkout", Map.of()).recordStep("A", Map.of("quantity", 10));
 
     @Test
     void sendsToTheNextStepsInputTopicKeyedByCorrelationId() {

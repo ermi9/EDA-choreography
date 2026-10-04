@@ -12,8 +12,8 @@ import java.util.UUID;
 import java.util.stream.Collectors;
 
 /**
- * What one step hands to the next: which instance this is, which flow it runs, everything that
- * has happened so far, and what each step produced.
+ * What one step hands to the next: which instance this is, which flow it runs, the request
+ * that started it, everything that has happened so far, and what each step produced.
  *
  * <p>The trace travels as full ancestry, so any step can rebuild the instance's history (and
  * its compensation order) from the message alone, with no shared store.
@@ -26,15 +26,21 @@ import java.util.stream.Collectors;
  *
  * @param correlationId the choreography instance
  * @param flowName      the flow whose plan this instance runs
+ * @param input         the request that started the instance, as a JSON object; never changes
  * @param trace         every step executed so far, as a well-formed DAG
  * @param results       each step's result as a JSON object, keyed by the producing entry's {@code resultRef}
  */
 public record ChoreographyMessage(
-        String correlationId, String flowName, List<TraceEntry> trace, Map<String, Map<String, Object>> results) {
+        String correlationId,
+        String flowName,
+        Map<String, Object> input,
+        List<TraceEntry> trace,
+        Map<String, Map<String, Object>> results) {
 
     public ChoreographyMessage {
         requireText(correlationId, "correlationId");
         requireText(flowName, "flowName");
+        input = JsonObjects.copyOf(input);
         trace = List.copyOf(trace);
         results = copyResults(results);
         var graph = TraceGraph.of(trace);
@@ -52,9 +58,9 @@ public record ChoreographyMessage(
         }
     }
 
-    /** The message that starts a new instance of a flow, before any step has run. */
-    public static ChoreographyMessage start(String correlationId, String flowName) {
-        return new ChoreographyMessage(correlationId, flowName, List.of(), Map.of());
+    /** The message that starts a new instance of a flow with the given request, before any step has run. */
+    public static ChoreographyMessage start(String correlationId, String flowName, Map<String, ?> input) {
+        return new ChoreographyMessage(correlationId, flowName, JsonObjects.copyOf(input), List.of(), Map.of());
     }
 
     /**
@@ -75,7 +81,7 @@ public record ChoreographyMessage(
         nextTrace.add(entry);
         var nextResults = new HashMap<>(results);
         nextResults.put(entry.resultRef(), JsonObjects.copyOf(result));
-        return new ChoreographyMessage(correlationId, flowName, nextTrace, nextResults);
+        return new ChoreographyMessage(correlationId, flowName, input, nextTrace, nextResults);
     }
 
     /** The result of the given step, if it ran. Meant for linear paths, where a step runs at most once. */

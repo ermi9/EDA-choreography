@@ -15,7 +15,7 @@ class MessageWireFormatTest {
 
     private static final String TOPIC = "B.in";
 
-    private final ChoreographyMessage message = ChoreographyMessage.start("order-42", "checkout")
+    private final ChoreographyMessage message = ChoreographyMessage.start("order-42", "checkout", Map.of("sku", "X-1", "quantity", 10))
             .recordStep("A", Map.of("quantity", 10))
             .recordStep("B", Map.of("amount", 30, "lines", List.of(Map.of("sku", "X-1", "express", true))));
 
@@ -41,7 +41,7 @@ class MessageWireFormatTest {
         var bytes = MessageWireFormat.serializer().serialize(TOPIC, new RecordHeaders(), message);
         var json = JsonMapper.builder().build().readTree(bytes);
 
-        assertThat(json.propertyNames()).containsExactlyInAnyOrder("correlationId", "flowName", "trace", "results");
+        assertThat(json.propertyNames()).containsExactlyInAnyOrder("correlationId", "flowName", "input", "trace", "results");
         assertThat(json.get("trace").get(0).propertyNames()).containsExactlyInAnyOrder(
                 "id", "parents", "correlationId", "stepId", "outcome", "resultRef");
         assertThat(json.get("trace").get(1).get("parents").get(0).asString())
@@ -54,13 +54,13 @@ class MessageWireFormatTest {
     @Test
     void ignoresFieldsAddedByALaterSchemaVersion() {
         var json = """
-                {"correlationId":"order-42","flowName":"checkout","trace":[],"results":{},"addedLater":{"x":1}}
+                {"correlationId":"order-42","flowName":"checkout","input":{},"trace":[],"results":{},"addedLater":{"x":1}}
                 """;
 
         var read = MessageWireFormat.deserializer()
                 .deserialize(TOPIC, new RecordHeaders(), json.getBytes(StandardCharsets.UTF_8));
 
-        assertThat(read).isEqualTo(ChoreographyMessage.start("order-42", "checkout"));
+        assertThat(read).isEqualTo(ChoreographyMessage.start("order-42", "checkout", Map.of()));
     }
 
     @Test
@@ -77,7 +77,7 @@ class MessageWireFormatTest {
     void aMessageThatBreaksTheDomainRulesIsFlaggedToo() {
         var headers = new RecordHeaders();
         var orphanResult = """
-                {"correlationId":"order-42","flowName":"checkout","trace":[],"results":{"ghost":{"quantity":10}}}
+                {"correlationId":"order-42","flowName":"checkout","input":{},"trace":[],"results":{"ghost":{"quantity":10}}}
                 """.getBytes(StandardCharsets.UTF_8);
 
         assertThat(MessageWireFormat.deserializer().deserialize(TOPIC, headers, orphanResult)).isNull();

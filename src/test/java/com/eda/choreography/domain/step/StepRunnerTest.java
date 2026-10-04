@@ -19,7 +19,7 @@ class StepRunnerTest {
 
     @Test
     void runsTheStepRecordsItAndPublishesToTheNextStep() {
-        var incoming = ChoreographyMessage.start("order-42", "checkout").recordStep("A", RESERVED);
+        var incoming = ChoreographyMessage.start("order-42", "checkout", Map.of()).recordStep("A", RESERVED);
         var runner = new StepRunner("B", message -> PRICED, FLOW, publisher);
 
         runner.handle(incoming);
@@ -33,7 +33,7 @@ class StepRunnerTest {
 
     @Test
     void theStepWorksOnTheResultsAccumulatedSoFar() {
-        var incoming = ChoreographyMessage.start("order-42", "checkout").recordStep("A", RESERVED);
+        var incoming = ChoreographyMessage.start("order-42", "checkout", Map.of()).recordStep("A", RESERVED);
         var tripled = new StepRunner(
                 "B", message -> Map.of("amount", 3 * (int) message.resultOf("A").orElseThrow().get("quantity")),
                 FLOW, publisher);
@@ -45,7 +45,7 @@ class StepRunnerTest {
 
     @Test
     void theLastStepReportsTheInstanceAsCompleted() {
-        var incoming = ChoreographyMessage.start("order-42", "checkout")
+        var incoming = ChoreographyMessage.start("order-42", "checkout", Map.of())
                 .recordStep("A", RESERVED)
                 .recordStep("B", PRICED);
         var runner = new StepRunner("C", message -> TAXED, FLOW, publisher);
@@ -61,11 +61,11 @@ class StepRunnerTest {
         NextSteps toBoth = (stepId, message) -> List.of("B", "C");
         var runner = new StepRunner("A", message -> RESERVED, toBoth, publisher);
 
-        runner.handle(ChoreographyMessage.start("order-42", "checkout"));
+        runner.handle(ChoreographyMessage.start("order-42", "checkout", Map.of()));
 
         assertThat(publisher.sent).extracting(RecordingPublisher.Sent::stepId).containsExactly("B", "C");
         assertThat(publisher.sent).extracting(RecordingPublisher.Sent::message).containsOnly(
-                ChoreographyMessage.start("order-42", "checkout").recordStep("A", RESERVED));
+                ChoreographyMessage.start("order-42", "checkout", Map.of()).recordStep("A", RESERVED));
     }
 
     @Test
@@ -74,7 +74,7 @@ class StepRunnerTest {
             throw new IllegalStateException("payment provider down");
         }, FLOW, publisher);
 
-        assertThatThrownBy(() -> runner.handle(ChoreographyMessage.start("order-42", "checkout")))
+        assertThatThrownBy(() -> runner.handle(ChoreographyMessage.start("order-42", "checkout", Map.of())))
                 .hasMessageContaining("payment provider down");
         assertThat(publisher.sent).isEmpty();
         assertThat(publisher.completed).isEmpty();

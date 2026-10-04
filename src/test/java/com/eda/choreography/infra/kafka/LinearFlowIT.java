@@ -33,9 +33,9 @@ class LinearFlowIT extends AbstractKafkaIT {
 
     private static final LinearFlow CHECKOUT = LinearFlow.of("checkout", "reserve", "price", "tax");
 
-    /** Each step works only from what earlier steps put in the message. */
+    /** Each step works only from the request and what earlier steps put in the message. */
     private static final Map<String, StepAction> ACTIONS = Map.of(
-            "reserve", message -> Map.of("quantity", 10),
+            "reserve", message -> Map.of("quantity", message.input().get("quantity")),
             "price", message -> Map.of("amount", number(message, "reserve", "quantity") * 3),
             "tax", message -> Map.of("total", number(message, "price", "amount") * 11 / 10));
 
@@ -68,7 +68,7 @@ class LinearFlowIT extends AbstractKafkaIT {
 
         try (var completed = consumerFactory.createConsumer("observer-" + correlationId, null)) {
             completed.subscribe(List.of(completedTopic));
-            publisher.publish(CHECKOUT.first(), ChoreographyMessage.start(correlationId, CHECKOUT.flowName()));
+            publisher.publish(CHECKOUT.first(), ChoreographyMessage.start(correlationId, CHECKOUT.flowName(), Map.of("sku", "X-1", "quantity", 10)));
 
             var done = awaitCompletion(completed, correlationId, Duration.ofSeconds(30));
 
