@@ -35,9 +35,9 @@ class LinearFlowIT extends AbstractKafkaIT {
 
     /** Each step works only from what earlier steps put in the message. */
     private static final Map<String, StepAction> ACTIONS = Map.of(
-            "reserve", message -> "10",
-            "price", message -> String.valueOf(number(message, "reserve") * 3),
-            "tax", message -> String.valueOf(number(message, "price") * 11 / 10));
+            "reserve", message -> Map.of("quantity", 10),
+            "price", message -> Map.of("amount", number(message, "reserve", "quantity") * 3),
+            "tax", message -> Map.of("total", number(message, "price", "amount") * 11 / 10));
 
     @Autowired
     StepContainerFactory containers;
@@ -72,9 +72,9 @@ class LinearFlowIT extends AbstractKafkaIT {
 
             var done = awaitCompletion(completed, correlationId, Duration.ofSeconds(30));
 
-            assertThat(done.resultOf("reserve")).contains("10");
-            assertThat(done.resultOf("price")).contains("30");
-            assertThat(done.resultOf("tax")).contains("33");
+            assertThat(done.resultOf("reserve")).contains(Map.of("quantity", 10));
+            assertThat(done.resultOf("price")).contains(Map.of("amount", 30));
+            assertThat(done.resultOf("tax")).contains(Map.of("total", 33));
 
             var trace = TraceGraph.of(done.trace());
             var reserve = entryFor(done, "reserve");
@@ -115,7 +115,7 @@ class LinearFlowIT extends AbstractKafkaIT {
         return message.trace().stream().filter(e -> e.stepId().equals(stepId)).findFirst().orElseThrow();
     }
 
-    private static int number(ChoreographyMessage message, String stepId) {
-        return Integer.parseInt(message.resultOf(stepId).orElseThrow());
+    private static int number(ChoreographyMessage message, String stepId, String field) {
+        return (int) message.resultOf(stepId).orElseThrow().get(field);
     }
 }

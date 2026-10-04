@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.eda.choreography.domain.message.ChoreographyMessage;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import org.apache.kafka.clients.producer.MockProducer;
 import org.apache.kafka.common.errors.TimeoutException;
@@ -17,7 +18,7 @@ class KafkaMessagePublisherTest {
 
     private static final String COMPLETED_TOPIC = "choreography.completed";
 
-    private final ChoreographyMessage message = ChoreographyMessage.start("order-42", "checkout").recordStep("A", "10");
+    private final ChoreographyMessage message = ChoreographyMessage.start("order-42", "checkout").recordStep("A", Map.of("quantity", 10));
 
     @Test
     void sendsToTheNextStepsInputTopicKeyedByCorrelationId() {

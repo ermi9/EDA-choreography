@@ -18,24 +18,25 @@ import java.util.stream.Collectors;
  * <p>The trace travels as full ancestry, so any step can rebuild the instance's history (and
  * its compensation order) from the message alone, with no shared store.
  *
- * <p>Results are keyed by the {@link TraceEntry#resultRef()} of the entry that produced them,
- * not by step name and not as a single payload field. Two branches of a fork therefore never
- * collide, and a join can merge its branches' messages by taking the union of their traces
- * and of their results.
+ * <p>Each step's result is a JSON object (see {@link JsonObjects}), so conditions later in the
+ * flow can test its fields. Results are keyed by the {@link TraceEntry#resultRef()} of the
+ * entry that produced them, not by step name and not as a single payload field. Two branches
+ * of a fork therefore never collide, and a join can merge its branches' messages by taking the
+ * union of their traces and of their results.
  *
  * @param correlationId the choreography instance
  * @param flowName      the flow whose plan this instance runs
  * @param trace         every step executed so far, as a well-formed DAG
- * @param results       each step's result, keyed by the producing entry's {@code resultRef}
+ * @param results       each step's result as a JSON object, keyed by the producing entry's {@code resultRef}
  */
 public record ChoreographyMessage(
-        String correlationId, String flowName, List<TraceEntry> trace, Map<String, String> results) {
+        String correlationId, String flowName, List<TraceEntry> trace, Map<String, Map<String, Object>> results) {
 
     public ChoreographyMessage {
         requireText(correlationId, "correlationId");
         requireText(flowName, "flowName");
         trace = List.copyOf(trace);
-        results = Map.copyOf(results);
+        results = copyResults(results);
         var graph = TraceGraph.of(trace);
         graph.correlationId()
                 .filter(traced -> !traced.equals(correlationId))
@@ -65,7 +66,7 @@ public record ChoreographyMessage(
      * runs then record the same entry, and the duplicate collapses in the trace instead of
      * becoming a second history.
      */
-    public ChoreographyMessage recordStep(String stepId, String result) {
+    public ChoreographyMessage recordStep(String stepId, Map<String, ?> result) {
         var parents = TraceGraph.of(trace).leaves().stream().map(TraceEntry::id).sorted().toList();
         var id = entryId(stepId, parents);
         var entry = TraceEntry.completed(id, correlationId, stepId, id, parents.toArray(String[]::new));
@@ -73,17 +74,23 @@ public record ChoreographyMessage(
         var nextTrace = new ArrayList<>(trace);
         nextTrace.add(entry);
         var nextResults = new HashMap<>(results);
-        nextResults.put(entry.resultRef(), result);
+        nextResults.put(entry.resultRef(), JsonObjects.copyOf(result));
         return new ChoreographyMessage(correlationId, flowName, nextTrace, nextResults);
     }
 
     /** The result of the given step, if it ran. Meant for linear paths, where a step runs at most once. */
-    public Optional<String> resultOf(String stepId) {
+    public Optional<Map<String, Object>> resultOf(String stepId) {
         return trace.stream()
                 .filter(entry -> entry.stepId().equals(stepId))
                 .map(TraceEntry::resultRef)
                 .map(results::get)
                 .findFirst();
+    }
+
+    private static Map<String, Map<String, Object>> copyResults(Map<String, Map<String, Object>> results) {
+        var copy = new HashMap<String, Map<String, Object>>();
+        results.forEach((ref, result) -> copy.put(ref, JsonObjects.copyOf(result)));
+        return Map.copyOf(copy);
     }
 
     private String entryId(String stepId, List<String> sortedParents) {

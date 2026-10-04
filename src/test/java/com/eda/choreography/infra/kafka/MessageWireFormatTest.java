@@ -4,6 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.eda.choreography.domain.message.ChoreographyMessage;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
+import java.util.Map;
 import org.apache.kafka.common.header.internals.RecordHeaders;
 import org.junit.jupiter.api.Test;
 import org.springframework.kafka.support.serializer.SerializationUtils;
@@ -14,8 +16,8 @@ class MessageWireFormatTest {
     private static final String TOPIC = "B.in";
 
     private final ChoreographyMessage message = ChoreographyMessage.start("order-42", "checkout")
-            .recordStep("A", "10")
-            .recordStep("B", "30");
+            .recordStep("A", Map.of("quantity", 10))
+            .recordStep("B", Map.of("amount", 30, "lines", List.of(Map.of("sku", "X-1", "express", true))));
 
     @Test
     void aMessageSurvivesTheWireUnchanged() {
@@ -44,6 +46,9 @@ class MessageWireFormatTest {
                 "id", "parents", "correlationId", "stepId", "outcome", "resultRef");
         assertThat(json.get("trace").get(1).get("parents").get(0).asString())
                 .isEqualTo(json.get("trace").get(0).get("id").asString());
+        var reserveResult = json.get("results").get(json.get("trace").get(0).get("resultRef").asString());
+        assertThat(reserveResult.isObject()).isTrue();
+        assertThat(reserveResult.get("quantity").asInt()).isEqualTo(10);
     }
 
     @Test
@@ -72,7 +77,7 @@ class MessageWireFormatTest {
     void aMessageThatBreaksTheDomainRulesIsFlaggedToo() {
         var headers = new RecordHeaders();
         var orphanResult = """
-                {"correlationId":"order-42","flowName":"checkout","trace":[],"results":{"ghost":"10"}}
+                {"correlationId":"order-42","flowName":"checkout","trace":[],"results":{"ghost":{"quantity":10}}}
                 """.getBytes(StandardCharsets.UTF_8);
 
         assertThat(MessageWireFormat.deserializer().deserialize(TOPIC, headers, orphanResult)).isNull();

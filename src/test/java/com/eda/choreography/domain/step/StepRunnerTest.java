@@ -5,61 +5,67 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.eda.choreography.domain.message.ChoreographyMessage;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 class StepRunnerTest {
 
     private static final LinearFlow FLOW = LinearFlow.of("checkout", "A", "B", "C");
+    private static final Map<String, Object> RESERVED = Map.of("quantity", 10);
+    private static final Map<String, Object> PRICED = Map.of("amount", 30);
+    private static final Map<String, Object> TAXED = Map.of("total", 33);
 
     private final RecordingPublisher publisher = new RecordingPublisher();
 
     @Test
     void runsTheStepRecordsItAndPublishesToTheNextStep() {
-        var incoming = ChoreographyMessage.start("order-42", "checkout").recordStep("A", "10");
-        var runner = new StepRunner("B", message -> "30", FLOW, publisher);
+        var incoming = ChoreographyMessage.start("order-42", "checkout").recordStep("A", RESERVED);
+        var runner = new StepRunner("B", message -> PRICED, FLOW, publisher);
 
         runner.handle(incoming);
 
         assertThat(publisher.completed).isEmpty();
         assertThat(publisher.sent).singleElement().satisfies(sent -> {
             assertThat(sent.stepId()).isEqualTo("C");
-            assertThat(sent.message()).isEqualTo(incoming.recordStep("B", "30"));
+            assertThat(sent.message()).isEqualTo(incoming.recordStep("B", PRICED));
         });
     }
 
     @Test
     void theStepWorksOnTheResultsAccumulatedSoFar() {
-        var incoming = ChoreographyMessage.start("order-42", "checkout").recordStep("A", "10");
+        var incoming = ChoreographyMessage.start("order-42", "checkout").recordStep("A", RESERVED);
         var tripled = new StepRunner(
-                "B", message -> String.valueOf(3 * Integer.parseInt(message.resultOf("A").orElseThrow())),
+                "B", message -> Map.of("amount", 3 * (int) message.resultOf("A").orElseThrow().get("quantity")),
                 FLOW, publisher);
 
         tripled.handle(incoming);
 
-        assertThat(publisher.sent.get(0).message().resultOf("B")).contains("30");
+        assertThat(publisher.sent.get(0).message().resultOf("B")).contains(PRICED);
     }
 
     @Test
     void theLastStepReportsTheInstanceAsCompleted() {
-        var incoming = ChoreographyMessage.start("order-42", "checkout").recordStep("A", "10").recordStep("B", "30");
-        var runner = new StepRunner("C", message -> "33", FLOW, publisher);
+        var incoming = ChoreographyMessage.start("order-42", "checkout")
+                .recordStep("A", RESERVED)
+                .recordStep("B", PRICED);
+        var runner = new StepRunner("C", message -> TAXED, FLOW, publisher);
 
         runner.handle(incoming);
 
         assertThat(publisher.sent).isEmpty();
-        assertThat(publisher.completed).containsExactly(incoming.recordStep("C", "33"));
+        assertThat(publisher.completed).containsExactly(incoming.recordStep("C", TAXED));
     }
 
     @Test
     void publishesTheSameMessageToEveryNextStep() {
         NextSteps toBoth = (stepId, message) -> List.of("B", "C");
-        var runner = new StepRunner("A", message -> "10", toBoth, publisher);
+        var runner = new StepRunner("A", message -> RESERVED, toBoth, publisher);
 
         runner.handle(ChoreographyMessage.start("order-42", "checkout"));
 
         assertThat(publisher.sent).extracting(RecordingPublisher.Sent::stepId).containsExactly("B", "C");
         assertThat(publisher.sent).extracting(RecordingPublisher.Sent::message).containsOnly(
-                ChoreographyMessage.start("order-42", "checkout").recordStep("A", "10"));
+                ChoreographyMessage.start("order-42", "checkout").recordStep("A", RESERVED));
     }
 
     @Test
@@ -76,7 +82,7 @@ class StepRunnerTest {
 
     @Test
     void rejectsABlankStepId() {
-        assertThatThrownBy(() -> new StepRunner(" ", message -> "x", FLOW, publisher))
+        assertThatThrownBy(() -> new StepRunner(" ", message -> Map.of(), FLOW, publisher))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 }
