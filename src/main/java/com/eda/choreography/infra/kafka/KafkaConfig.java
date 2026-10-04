@@ -61,4 +61,9 @@ public class KafkaConfig {
                 new StringDeserializer(),
                 MessageWireFormat.deserializer());
     }
+
+    @Bean
+    StepContainerFactory stepContainerFactory(ConsumerFactory<String, ChoreographyMessage> consumerFactory) {
+        return new StepContainerFactory(consumerFactory);
+    }
 }
