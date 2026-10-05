@@ -1,5 +1,6 @@
 package com.eda.choreography.infra.redis;
 
+import com.eda.choreography.domain.join.JoinStateMachine;
 import com.eda.choreography.domain.join.JoinStateStore;
 import java.time.Duration;
 import org.springframework.beans.factory.annotation.Value;
@@ -19,5 +20,10 @@ public class RedisConfig {
             StringRedisTemplate redis,
             @Value("${choreography.join.state-ttl}") Duration stateTimeToLive) {
         return new RedisJoinStateStore(redis, stateTimeToLive);
+    }
+
+    @Bean
+    JoinStateMachine joinStateMachine(JoinStateStore store) {
+        return new JoinStateMachine(store);
     }
 }

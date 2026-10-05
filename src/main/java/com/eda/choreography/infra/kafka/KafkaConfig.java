@@ -1,5 +1,8 @@
 package com.eda.choreography.infra.kafka;
 
+import com.eda.choreography.domain.compensation.CompensationPublisher;
+import com.eda.choreography.domain.compensation.CompensationRequest;
+import com.eda.choreography.domain.compensation.CompensationTrigger;
 import com.eda.choreography.domain.message.ChoreographyMessage;
 import com.eda.choreography.domain.step.MessagePublisher;
 import java.util.Map;
@@ -40,30 +43,70 @@ public class KafkaConfig {
     }
 
     @Bean
+    ProducerFactory<String, CompensationRequest> compensationProducerFactory(
+            @Value("${spring.kafka.bootstrap-servers}") String bootstrapServers) {
+        return new DefaultKafkaProducerFactory<>(
+                Map.of(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers),
+                new StringSerializer(),
+                MessageWireFormat.serializer());
+    }
+
+    @Bean
+    KafkaTemplate<String, CompensationRequest> compensationKafkaTemplate(
+            ProducerFactory<String, CompensationRequest> producerFactory) {
+        return new KafkaTemplate<>(producerFactory);
+    }
+
+    @Bean
+    CompensationPublisher compensationPublisher(
+            KafkaTemplate<String, CompensationRequest> requests,
+            KafkaTemplate<String, ChoreographyMessage> messages,
+            @Value("${choreography.kafka.compensated-topic}") String compensatedTopic) {
+        return new KafkaCompensationPublisher(requests, messages, compensatedTopic);
+    }
+
+    @Bean
+    CompensationTrigger compensationTrigger(CompensationPublisher publisher) {
+        return new CompensationTrigger(publisher);
+    }
+
+    @Bean
     MessagePublisher messagePublisher(
             KafkaTemplate<String, ChoreographyMessage> template,
             @Value("${choreography.kafka.completed-topic}") String completedTopic) {
         return new KafkaMessagePublisher(template, completedTopic);
     }
 
-    /**
-     * A step that joins late, or a new consumer group, starts from the earliest unconsumed
-     * message: requests already waiting on a step's topic must not be skipped.
-     */
     @Bean
     ConsumerFactory<String, ChoreographyMessage> choreographyConsumerFactory(
             @Value("${spring.kafka.bootstrap-servers}") String bootstrapServers) {
         return new DefaultKafkaConsumerFactory<>(
-                Map.of(
-                        ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers,
-                        ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest",
-                        ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, false),
+                consumerProperties(bootstrapServers), new StringDeserializer(), MessageWireFormat.deserializer());
+    }
+
+    @Bean
+    ConsumerFactory<String, CompensationRequest> compensationConsumerFactory(
+            @Value("${spring.kafka.bootstrap-servers}") String bootstrapServers) {
+        return new DefaultKafkaConsumerFactory<>(
+                consumerProperties(bootstrapServers),
                 new StringDeserializer(),
-                MessageWireFormat.deserializer());
+                MessageWireFormat.deserializer(CompensationRequest.class));
     }
 
     @Bean
     StepContainerFactory stepContainerFactory(ConsumerFactory<String, ChoreographyMessage> consumerFactory) {
         return new StepContainerFactory(consumerFactory);
+    }
+
+    /**
+     * A step that joins late, or a new consumer group, starts from the earliest unconsumed
+     * message: requests already waiting on a step's topic must not be skipped. Offsets are
+     * committed by the listener containers, never automatically.
+     */
+    private static Map<String, Object> consumerProperties(String bootstrapServers) {
+        return Map.of(
+                ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers,
+                ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest",
+                ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, false);
     }
 }
