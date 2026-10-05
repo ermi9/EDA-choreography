@@ -100,6 +100,31 @@ class ChoreographyMessageTest {
     }
 
     @Test
+    void aFailedStepIsChainedLikeAnyOtherButLeavesNothingToUndo() {
+        var reserved = ChoreographyMessage.start(CORRELATION, FLOW, Map.of()).recordStep("A", RESERVED);
+
+        var failed = reserved.recordFailure("B");
+
+        var b = entryFor(failed, "B");
+        assertThat(b.parents()).containsExactly(entryFor(reserved, "A").id());
+        assertThat(b.needsCompensation()).isFalse();
+        assertThat(failed.resultOf("B")).isEmpty();
+        assertThat(failed.hasFailed()).isTrue();
+        assertThat(reserved.hasFailed()).isFalse();
+    }
+
+    @Test
+    void aFailureGetsAnotherIdThanACompletedRunOfTheSameStep() {
+        // A step can complete, be redelivered and then fail; both entries may meet at a join.
+        var reserved = ChoreographyMessage.start(CORRELATION, FLOW, Map.of()).recordStep("A", RESERVED);
+
+        var failedId = entryFor(reserved.recordFailure("B"), "B").id();
+
+        assertThat(failedId).isNotEqualTo(entryFor(reserved.recordStep("B", PRICED), "B").id());
+        assertThat(reserved.recordFailure("B")).isEqualTo(reserved.recordFailure("B"));
+    }
+
+    @Test
     void aResultIsAJsonObjectThatCannotChangeAfterwards() {
         var nested = new HashMap<String, Object>(Map.of("risk", "LOW"));
         var message = ChoreographyMessage.start(CORRELATION, FLOW, Map.of()).recordStep("A", Map.of("assessment", nested));

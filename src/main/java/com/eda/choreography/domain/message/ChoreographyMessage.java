@@ -73,8 +73,8 @@ public record ChoreographyMessage(
      * becoming a second history.
      */
     public ChoreographyMessage recordStep(String stepId, Map<String, ?> result) {
-        var parents = TraceGraph.of(trace).leaves().stream().map(TraceEntry::id).sorted().toList();
-        var id = entryId(stepId, parents);
+        var parents = currentLeafIds();
+        var id = entryId(stepId, parents, "");
         var entry = TraceEntry.completed(id, correlationId, stepId, id, parents.toArray(String[]::new));
 
         var nextTrace = new ArrayList<>(trace);
@@ -84,10 +84,31 @@ public record ChoreographyMessage(
         return new ChoreographyMessage(correlationId, flowName, input, nextTrace, nextResults);
     }
 
+    /**
+     * This message with a failed step appended: the step gave up and committed nothing, so the
+     * entry has no result and nothing to undo. It still takes part in the trace, which is how
+     * a join and the compensation order learn that the branch failed.
+     *
+     * <p>The id is derived like a completed entry's, but from a different name, because a step
+     * may complete, be redelivered and only then fail.
+     */
+    public ChoreographyMessage recordFailure(String stepId) {
+        var parents = currentLeafIds();
+        var id = entryId(stepId, parents, "|failed");
+        var nextTrace = new ArrayList<>(trace);
+        nextTrace.add(TraceEntry.failed(id, correlationId, stepId, parents.toArray(String[]::new)));
+        return new ChoreographyMessage(correlationId, flowName, input, nextTrace, results);
+    }
+
+    /** Whether any step of this instance has failed. */
+    public boolean hasFailed() {
+        return trace.stream().anyMatch(entry -> entry.outcome() == TraceEntry.Outcome.FAILED);
+    }
+
     /** The result of the given step, if it ran. Meant for linear paths, where a step runs at most once. */
     public Optional<Map<String, Object>> resultOf(String stepId) {
         return trace.stream()
-                .filter(entry -> entry.stepId().equals(stepId))
+                .filter(entry -> entry.stepId().equals(stepId) && entry.resultRef() != null)
                 .map(TraceEntry::resultRef)
                 .map(results::get)
                 .findFirst();
@@ -99,8 +120,13 @@ public record ChoreographyMessage(
         return Map.copyOf(copy);
     }
 
-    private String entryId(String stepId, List<String> sortedParents) {
-        var name = correlationId + '|' + stepId + '|' + String.join(",", sortedParents);
+    private List<String> currentLeafIds() {
+        return TraceGraph.of(trace).leaves().stream().map(TraceEntry::id).sorted().toList();
+    }
+
+    /** {@code outcomeSuffix} is empty for a completed step, so its ids are the ones INC-3 produced. */
+    private String entryId(String stepId, List<String> sortedParents, String outcomeSuffix) {
+        var name = correlationId + '|' + stepId + '|' + String.join(",", sortedParents) + outcomeSuffix;
         return stepId + ':' + UUID.nameUUIDFromBytes(name.getBytes(StandardCharsets.UTF_8));
     }
 
