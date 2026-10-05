@@ -2,6 +2,8 @@ package com.eda.choreography.infra.redis;
 
 import com.eda.choreography.domain.join.JoinKey;
 import com.eda.choreography.domain.join.JoinState;
+import com.eda.choreography.domain.message.ChoreographyMessage;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -13,7 +15,8 @@ record StoredJoinState(
         String joinId,
         int expectedBranches,
         Set<String> arrivedBranches,
-        boolean fired) {
+        boolean fired,
+        Map<String, ChoreographyMessage> branchMessages) {
 
     static StoredJoinState from(JoinState state) {
         return new StoredJoinState(
@@ -21,10 +24,13 @@ record StoredJoinState(
                 state.key().joinId(),
                 state.expectedBranches(),
                 state.arrivedBranches(),
-                state.fired());
+                state.fired(),
+                state.branchMessages());
     }
 
+    /** A join stored before branch messages were kept reads back as one that kept none. */
     JoinState toDomain() {
-        return new JoinState(new JoinKey(correlationId, joinId), expectedBranches, arrivedBranches, fired);
+        var messages = branchMessages == null ? Map.<String, ChoreographyMessage>of() : branchMessages;
+        return new JoinState(new JoinKey(correlationId, joinId), expectedBranches, arrivedBranches, fired, messages);
     }
 }

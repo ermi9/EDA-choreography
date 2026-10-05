@@ -1,6 +1,9 @@
 package com.eda.choreography.domain.join;
 
+import com.eda.choreography.domain.message.ChoreographyMessage;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -17,8 +20,15 @@ import java.util.Set;
  * @param expectedBranches how many distinct branches complete the join
  * @param arrivedBranches  the distinct branch ids seen so far
  * @param fired            whether the join has already fired
+ * @param branchMessages   the message each branch arrived with, for the branches that brought
+ *                         one; the join merges them when it fires
  */
-public record JoinState(JoinKey key, int expectedBranches, Set<String> arrivedBranches, boolean fired) {
+public record JoinState(
+        JoinKey key,
+        int expectedBranches,
+        Set<String> arrivedBranches,
+        boolean fired,
+        Map<String, ChoreographyMessage> branchMessages) {
 
     public JoinState {
         if (key == null) {
@@ -28,6 +38,7 @@ public record JoinState(JoinKey key, int expectedBranches, Set<String> arrivedBr
             throw new JoinProtocolException("expectedBranches must be at least 1, was " + expectedBranches);
         }
         arrivedBranches = Set.copyOf(arrivedBranches);
+        branchMessages = Map.copyOf(branchMessages);
         if (arrivedBranches.size() > expectedBranches) {
             throw new JoinProtocolException(
                     "join " + key + " has " + arrivedBranches.size() + " branches, expected " + expectedBranches);
@@ -35,6 +46,21 @@ public record JoinState(JoinKey key, int expectedBranches, Set<String> arrivedBr
         if (fired && arrivedBranches.size() != expectedBranches) {
             throw new JoinProtocolException("join " + key + " cannot have fired before all branches arrived");
         }
+        for (var branch : branchMessages.entrySet()) {
+            if (!arrivedBranches.contains(branch.getKey())) {
+                throw new JoinProtocolException("join " + key + " keeps a message for branch " + branch.getKey()
+                        + ", which has not arrived");
+            }
+            if (!branch.getValue().correlationId().equals(key.correlationId())) {
+                throw new JoinProtocolException("join " + key + " was handed a message of "
+                        + branch.getValue().correlationId());
+            }
+        }
+    }
+
+    /** A state that only counts branches and keeps no messages. */
+    public JoinState(JoinKey key, int expectedBranches, Set<String> arrivedBranches, boolean fired) {
+        this(key, expectedBranches, arrivedBranches, fired, Map.of());
     }
 
     /** A join no branch has reached yet. */
@@ -48,12 +74,21 @@ public record JoinState(JoinKey key, int expectedBranches, Set<String> arrivedBr
 
     /** This state with {@code branchId} added; throws if that would exceed the expected count. */
     JoinState withArrival(String branchId) {
+        return withArrival(branchId, null);
+    }
+
+    /** As {@link #withArrival(String)}, also keeping the branch's message when there is one. */
+    JoinState withArrival(String branchId, ChoreographyMessage message) {
         var arrived = new HashSet<>(arrivedBranches);
         arrived.add(branchId);
-        return new JoinState(key, expectedBranches, arrived, fired);
+        var messages = new HashMap<>(branchMessages);
+        if (message != null) {
+            messages.putIfAbsent(branchId, message);
+        }
+        return new JoinState(key, expectedBranches, arrived, fired, messages);
     }
 
     JoinState markFired() {
-        return new JoinState(key, expectedBranches, arrivedBranches, true);
+        return new JoinState(key, expectedBranches, arrivedBranches, true, branchMessages);
     }
 }

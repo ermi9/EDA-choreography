@@ -4,8 +4,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.eda.choreography.domain.join.JoinOutcome.Decision;
+import com.eda.choreography.domain.message.ChoreographyMessage;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -130,6 +132,29 @@ class JoinStateMachineTest {
 
         assertThat(arrive("C", 3).decision()).isEqualTo(Decision.WAITING);
         assertThat(arrive("D", 3).fired()).isTrue();
+    }
+
+    @Test
+    void firingHandsBackTheMessageOfEveryBranch() {
+        var forked = ChoreographyMessage.start("corr-1", "flow", Map.of()).recordStep("A", Map.of());
+        var left = forked.recordStep("B", Map.of("side", "left"));
+        var right = forked.recordStep("C", Map.of("side", "right"));
+
+        machine.arrive(new BranchArrival(JOIN, "B", 2, left));
+        var fired = machine.arrive(new BranchArrival(JOIN, "C", 2, right));
+
+        assertThat(fired.state().branchMessages()).containsOnly(Map.entry("B", left), Map.entry("C", right));
+    }
+
+    @Test
+    void aDuplicateDoesNotReplaceTheMessageAlreadyKept() {
+        var forked = ChoreographyMessage.start("corr-1", "flow", Map.of()).recordStep("A", Map.of());
+        var first = forked.recordStep("B", Map.of("run", 1));
+
+        machine.arrive(new BranchArrival(JOIN, "B", 2, first));
+        var repeat = machine.arrive(new BranchArrival(JOIN, "B", 2, forked.recordStep("B", Map.of("run", 2))));
+
+        assertThat(repeat.state().branchMessages()).containsOnly(Map.entry("B", first));
     }
 
     private JoinOutcome arrive(String branchId, int expected) {

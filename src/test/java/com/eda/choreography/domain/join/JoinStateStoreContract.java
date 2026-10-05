@@ -2,6 +2,9 @@ package com.eda.choreography.domain.join;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.eda.choreography.domain.message.ChoreographyMessage;
+import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
 
@@ -24,6 +27,19 @@ public interface JoinStateStoreContract {
     @Test
     default void returnsWhatWasSaved() {
         var state = new JoinState(JOIN, 3, Set.of("B", "C"), false);
+
+        store().save(state);
+
+        assertThat(store().find(JOIN)).contains(state);
+    }
+
+    @Test
+    default void returnsTheBranchMessagesThatWereSaved() {
+        var forked = ChoreographyMessage.start("corr-1", "flow", Map.of("sku", "X-1"))
+                .recordStep("A", Map.of("quantity", 10, "tags", List.of("a", "b")));
+        var state = new JoinState(JOIN, 2, Set.of("B", "C"), true, Map.of(
+                "B", forked.recordStep("B", Map.of("nested", Map.of("ok", true))),
+                "C", forked.recordFailure("C")));
 
         store().save(state);
 

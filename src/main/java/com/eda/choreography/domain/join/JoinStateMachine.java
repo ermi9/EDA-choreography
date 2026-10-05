@@ -35,7 +35,7 @@ public final class JoinStateMachine {
             return new JoinOutcome(Decision.DUPLICATE, state);
         }
 
-        var next = state.withArrival(arrival.branchId());
+        var next = state.withArrival(arrival.branchId(), arrival.message());
         if (next.isComplete()) {
             next = next.markFired();
             store.save(next);
