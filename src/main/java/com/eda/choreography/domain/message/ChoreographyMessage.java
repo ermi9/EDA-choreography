@@ -4,10 +4,12 @@ import com.eda.choreography.domain.trace.TraceEntry;
 import com.eda.choreography.domain.trace.TraceGraph;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.TreeMap;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -98,6 +100,41 @@ public record ChoreographyMessage(
         var nextTrace = new ArrayList<>(trace);
         nextTrace.add(TraceEntry.failed(id, correlationId, stepId, parents.toArray(String[]::new)));
         return new ChoreographyMessage(correlationId, flowName, input, nextTrace, results);
+    }
+
+    /**
+     * The message a join continues with: the union of its branches' traces and results. The
+     * branches share their history up to the fork, and those entries are kept once. The trace
+     * is ordered by entry id, so the merge does not depend on the order branches arrived in.
+     *
+     * <p>If two branches carry different results for the same entry (a step before the fork ran
+     * twice and answered differently each time), the result from the first branch given wins.
+     * Callers pass branches in a stable order so that choice is repeatable.
+     */
+    public static ChoreographyMessage merge(Collection<ChoreographyMessage> branches) {
+        if (branches.isEmpty()) {
+            throw new MalformedMessageException("there are no branches to merge");
+        }
+        var first = branches.iterator().next();
+        var entries = new TreeMap<String, TraceEntry>();
+        var results = new HashMap<String, Map<String, Object>>();
+        for (var branch : branches) {
+            if (!branch.correlationId.equals(first.correlationId)
+                    || !branch.flowName.equals(first.flowName)
+                    || !branch.input.equals(first.input)) {
+                throw new MalformedMessageException("cannot merge a branch of " + branch.correlationId
+                        + " (" + branch.flowName + ") into " + first.correlationId + " (" + first.flowName + ")");
+            }
+            for (var entry : branch.trace) {
+                var known = entries.putIfAbsent(entry.id(), entry);
+                if (known != null && !known.equals(entry)) {
+                    throw new MalformedMessageException("branches disagree on entry " + entry.id());
+                }
+            }
+            branch.results.forEach(results::putIfAbsent);
+        }
+        return new ChoreographyMessage(
+                first.correlationId, first.flowName, first.input, List.copyOf(entries.values()), results);
     }
 
     /** Whether any step of this instance has failed. */

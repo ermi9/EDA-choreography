@@ -125,6 +125,68 @@ class ChoreographyMessageTest {
     }
 
     @Test
+    void mergingBranchesKeepsEveryBranchAndTheSharedAncestorsOnce() {
+        var forked = ChoreographyMessage.start(CORRELATION, FLOW, REQUEST).recordStep("A", RESERVED);
+        var left = forked.recordStep("B", PRICED);
+        var right = forked.recordStep("C", TAXED);
+
+        var merged = ChoreographyMessage.merge(List.of(left, right));
+
+        assertThat(merged.trace()).hasSize(3);
+        assertThat(merged.resultOf("A")).contains(RESERVED);
+        assertThat(merged.resultOf("B")).contains(PRICED);
+        assertThat(merged.resultOf("C")).contains(TAXED);
+        assertThat(merged.input()).isEqualTo(REQUEST);
+        var joined = entryFor(merged.recordStep("D", Map.of()), "D");
+        assertThat(joined.parents()).containsExactlyInAnyOrder(entryFor(left, "B").id(), entryFor(right, "C").id());
+    }
+
+    @Test
+    void mergingDoesNotDependOnTheOrderBranchesArrivedIn() {
+        var forked = ChoreographyMessage.start(CORRELATION, FLOW, REQUEST).recordStep("A", RESERVED);
+        var left = forked.recordStep("B", PRICED);
+        var right = forked.recordStep("C", TAXED);
+
+        assertThat(ChoreographyMessage.merge(List.of(left, right)))
+                .isEqualTo(ChoreographyMessage.merge(List.of(right, left)));
+    }
+
+    @Test
+    void mergingKeepsAFailedBranch() {
+        var forked = ChoreographyMessage.start(CORRELATION, FLOW, REQUEST).recordStep("A", RESERVED);
+
+        var merged = ChoreographyMessage.merge(List.of(forked.recordStep("B", PRICED), forked.recordFailure("C")));
+
+        assertThat(merged.hasFailed()).isTrue();
+    }
+
+    @Test
+    void onlyBranchesOfOneInstanceCanBeMerged() {
+        var mine = ChoreographyMessage.start(CORRELATION, FLOW, REQUEST).recordStep("A", RESERVED);
+        var otherInstance = ChoreographyMessage.start("order-43", FLOW, REQUEST).recordStep("A", RESERVED);
+        var otherRequest = ChoreographyMessage.start(CORRELATION, FLOW, Map.of("sku", "Y-2")).recordStep("A", RESERVED);
+
+        assertThatThrownBy(() -> ChoreographyMessage.merge(List.of(mine, otherInstance)))
+                .isInstanceOf(MalformedMessageException.class);
+        assertThatThrownBy(() -> ChoreographyMessage.merge(List.of(mine, otherRequest)))
+                .isInstanceOf(MalformedMessageException.class);
+        assertThatThrownBy(() -> ChoreographyMessage.merge(List.of()))
+                .isInstanceOf(MalformedMessageException.class);
+    }
+
+    @Test
+    void branchesThatDisagreeOnASharedEntryCannotBeMerged() {
+        var completed = TraceEntry.completed("a", CORRELATION, "A", "a");
+        var failed = TraceEntry.failed("a", CORRELATION, "A");
+        var one = new ChoreographyMessage(CORRELATION, FLOW, Map.of(), List.of(completed), Map.of("a", RESERVED));
+        var other = new ChoreographyMessage(CORRELATION, FLOW, Map.of(), List.of(failed), Map.of());
+
+        assertThatThrownBy(() -> ChoreographyMessage.merge(List.of(one, other)))
+                .isInstanceOf(MalformedMessageException.class)
+                .hasMessageContaining("a");
+    }
+
+    @Test
     void aResultIsAJsonObjectThatCannotChangeAfterwards() {
         var nested = new HashMap<String, Object>(Map.of("risk", "LOW"));
         var message = ChoreographyMessage.start(CORRELATION, FLOW, Map.of()).recordStep("A", Map.of("assessment", nested));
