@@ -41,7 +41,7 @@ class JoinStateTest {
     void keepsMessagesOnlyForBranchesThatArrived() {
         var message = ChoreographyMessage.start("corr-1", "flow", Map.of()).recordStep("B", Map.of());
 
-        assertThatThrownBy(() -> new JoinState(JOIN, 2, Set.of("C"), false, Map.of("B", message)))
+        assertThatThrownBy(() -> new JoinState(JOIN, 2, Set.of("C"), JoinState.Status.OPEN, Map.of("B", message)))
                 .isInstanceOf(JoinProtocolException.class)
                 .hasMessageContaining("B");
     }
@@ -50,7 +50,7 @@ class JoinStateTest {
     void keepsMessagesOnlyOfItsOwnInstance() {
         var foreign = ChoreographyMessage.start("corr-2", "flow", Map.of()).recordStep("B", Map.of());
 
-        assertThatThrownBy(() -> new JoinState(JOIN, 2, Set.of("B"), false, Map.of("B", foreign)))
+        assertThatThrownBy(() -> new JoinState(JOIN, 2, Set.of("B"), JoinState.Status.OPEN, Map.of("B", foreign)))
                 .isInstanceOf(JoinProtocolException.class)
                 .hasMessageContaining("corr-2");
     }

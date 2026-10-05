@@ -37,7 +37,7 @@ public interface JoinStateStoreContract {
     default void returnsTheBranchMessagesThatWereSaved() {
         var forked = ChoreographyMessage.start("corr-1", "flow", Map.of("sku", "X-1"))
                 .recordStep("A", Map.of("quantity", 10, "tags", List.of("a", "b")));
-        var state = new JoinState(JOIN, 2, Set.of("B", "C"), true, Map.of(
+        var state = new JoinState(JOIN, 2, Set.of("B", "C"), JoinState.Status.FIRED, Map.of(
                 "B", forked.recordStep("B", Map.of("nested", Map.of("ok", true))),
                 "C", forked.recordFailure("C")));
 

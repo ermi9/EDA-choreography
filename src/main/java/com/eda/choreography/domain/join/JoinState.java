@@ -13,13 +13,13 @@ import java.util.Set;
  * at-least-once, so the same branch can arrive twice, and a counter would count it twice and
  * fire before the other branches are done. The set makes a repeat a no-op.
  *
- * <p>{@code fired} is kept after the join completes so that a late duplicate is recognised as a
+ * <p>The state is kept after the join fires so that a late duplicate is recognised as a
  * duplicate instead of opening a fresh join that could never complete.
  *
  * @param key              the join
  * @param expectedBranches how many distinct branches complete the join
  * @param arrivedBranches  the distinct branch ids seen so far
- * @param fired            whether the join has already fired
+ * @param status           whether the join is still waiting or has fired
  * @param branchMessages   the message each branch arrived with, for the branches that brought
  *                         one; the join merges them when it fires
  */
@@ -27,8 +27,15 @@ public record JoinState(
         JoinKey key,
         int expectedBranches,
         Set<String> arrivedBranches,
-        boolean fired,
+        Status status,
         Map<String, ChoreographyMessage> branchMessages) {
+
+    public enum Status {
+        /** Waiting for branches. */
+        OPEN,
+        /** Every branch arrived and the join fired. */
+        FIRED
+    }
 
     public JoinState {
         if (key == null) {
@@ -37,13 +44,16 @@ public record JoinState(
         if (expectedBranches < 1) {
             throw new JoinProtocolException("expectedBranches must be at least 1, was " + expectedBranches);
         }
+        if (status == null) {
+            throw new JoinProtocolException("status must be non-null");
+        }
         arrivedBranches = Set.copyOf(arrivedBranches);
         branchMessages = Map.copyOf(branchMessages);
         if (arrivedBranches.size() > expectedBranches) {
             throw new JoinProtocolException(
                     "join " + key + " has " + arrivedBranches.size() + " branches, expected " + expectedBranches);
         }
-        if (fired && arrivedBranches.size() != expectedBranches) {
+        if (status == Status.FIRED && arrivedBranches.size() != expectedBranches) {
             throw new JoinProtocolException("join " + key + " cannot have fired before all branches arrived");
         }
         for (var branch : branchMessages.entrySet()) {
@@ -60,12 +70,16 @@ public record JoinState(
 
     /** A state that only counts branches and keeps no messages. */
     public JoinState(JoinKey key, int expectedBranches, Set<String> arrivedBranches, boolean fired) {
-        this(key, expectedBranches, arrivedBranches, fired, Map.of());
+        this(key, expectedBranches, arrivedBranches, fired ? Status.FIRED : Status.OPEN, Map.of());
     }
 
     /** A join no branch has reached yet. */
     public static JoinState open(JoinKey key, int expectedBranches) {
         return new JoinState(key, expectedBranches, Set.of(), false);
+    }
+
+    public boolean fired() {
+        return status == Status.FIRED;
     }
 
     public boolean isComplete() {
@@ -85,10 +99,10 @@ public record JoinState(
         if (message != null) {
             messages.putIfAbsent(branchId, message);
         }
-        return new JoinState(key, expectedBranches, arrived, fired, messages);
+        return new JoinState(key, expectedBranches, arrived, status, messages);
     }
 
     JoinState markFired() {
-        return new JoinState(key, expectedBranches, arrivedBranches, true, branchMessages);
+        return new JoinState(key, expectedBranches, arrivedBranches, Status.FIRED, branchMessages);
     }
 }

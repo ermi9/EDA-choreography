@@ -31,6 +31,7 @@ record StoredJoinState(
     /** A join stored before branch messages were kept reads back as one that kept none. */
     JoinState toDomain() {
         var messages = branchMessages == null ? Map.<String, ChoreographyMessage>of() : branchMessages;
-        return new JoinState(new JoinKey(correlationId, joinId), expectedBranches, arrivedBranches, fired, messages);
+        var status = fired ? JoinState.Status.FIRED : JoinState.Status.OPEN;
+        return new JoinState(new JoinKey(correlationId, joinId), expectedBranches, arrivedBranches, status, messages);
     }
 }
