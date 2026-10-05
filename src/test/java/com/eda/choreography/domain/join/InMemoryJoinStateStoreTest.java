@@ -1,11 +1,11 @@
 package com.eda.choreography.domain.join;
 
-class InMemoryJoinStateStoreTest extends JoinStateStoreContract {
+class InMemoryJoinStateStoreTest implements JoinStateStoreContract {
 
     private final JoinStateStore store = new InMemoryJoinStateStore();
 
     @Override
-    protected JoinStateStore store() {
+    public JoinStateStore store() {
         return store;
     }
 }

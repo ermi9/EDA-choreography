@@ -6,22 +6,23 @@ import java.util.Set;
 import org.junit.jupiter.api.Test;
 
 /**
- * What every {@link JoinStateStore} must do. Each implementation's test extends this class, so
- * the in-memory store and INC-4's Redis store are held to one contract.
+ * What every {@link JoinStateStore} must do. Each implementation's test implements this
+ * interface, so the in-memory store and the Redis store are held to one contract. It is an
+ * interface so that a container-backed test can still extend its own base class.
  */
-abstract class JoinStateStoreContract {
+public interface JoinStateStoreContract {
 
-    protected abstract JoinStateStore store();
+    JoinKey JOIN = new JoinKey("corr-1", "J");
 
-    private static final JoinKey JOIN = new JoinKey("corr-1", "J");
+    JoinStateStore store();
 
     @Test
-    void findsNothingForAnUnknownJoin() {
+    default void findsNothingForAnUnknownJoin() {
         assertThat(store().find(JOIN)).isEmpty();
     }
 
     @Test
-    void returnsWhatWasSaved() {
+    default void returnsWhatWasSaved() {
         var state = new JoinState(JOIN, 3, Set.of("B", "C"), false);
 
         store().save(state);
@@ -30,7 +31,7 @@ abstract class JoinStateStoreContract {
     }
 
     @Test
-    void laterSaveReplacesEarlierOne() {
+    default void laterSaveReplacesEarlierOne() {
         store().save(new JoinState(JOIN, 2, Set.of("B"), false));
         var fired = new JoinState(JOIN, 2, Set.of("B", "C"), true);
 
@@ -40,12 +41,21 @@ abstract class JoinStateStoreContract {
     }
 
     @Test
-    void keepsJoinsApartByCorrelationAndJoinId() {
+    default void keepsJoinsApartByCorrelationAndJoinId() {
         var otherInstance = new JoinKey("corr-2", "J");
         var otherJoin = new JoinKey("corr-1", "K");
         store().save(new JoinState(JOIN, 2, Set.of("B"), false));
 
         assertThat(store().find(otherInstance)).isEmpty();
         assertThat(store().find(otherJoin)).isEmpty();
+    }
+
+    @Test
+    default void keepsJoinsApartWhenTheirIdsOnlyDifferInWhereASeparatorFalls() {
+        var left = new JoinKey("corr:1", "J");
+        var right = new JoinKey("corr", "1:J");
+        store().save(new JoinState(left, 2, Set.of("B"), false));
+
+        assertThat(store().find(right)).isEmpty();
     }
 }
