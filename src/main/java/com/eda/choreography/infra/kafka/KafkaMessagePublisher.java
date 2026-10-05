@@ -3,8 +3,6 @@ package com.eda.choreography.infra.kafka;
 import com.eda.choreography.domain.message.ChoreographyMessage;
 import com.eda.choreography.domain.step.MessagePublisher;
 import java.util.Objects;
-import java.util.concurrent.ExecutionException;
-import org.springframework.kafka.KafkaException;
 import org.springframework.kafka.core.KafkaTemplate;
 
 /**
@@ -14,9 +12,7 @@ import org.springframework.kafka.core.KafkaTemplate;
  * <p>Every record is keyed by correlation id, so all of an instance's messages land on one
  * partition per topic and are consumed in order. INC-4's join relies on that.
  *
- * <p>A send blocks until the broker acknowledges it (bounded by the producer's
- * {@code delivery.timeout.ms}). The listener only acknowledges its input after the step has
- * published, so a failed send means redelivery, never a lost hop.
+ * <p>A send blocks until the broker acknowledges it (see {@link BlockingSend}).
  */
 public class KafkaMessagePublisher implements MessagePublisher {
 
@@ -39,13 +35,6 @@ public class KafkaMessagePublisher implements MessagePublisher {
     }
 
     private void send(String topic, ChoreographyMessage message) {
-        try {
-            template.send(topic, message.correlationId(), message).get();
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new KafkaException("interrupted while publishing " + message.correlationId() + " to " + topic, e);
-        } catch (ExecutionException e) {
-            throw new KafkaException("could not publish " + message.correlationId() + " to " + topic, e.getCause());
-        }
+        BlockingSend.send(template, topic, message.correlationId(), message);
     }
 }
