@@ -1,4 +1,4 @@
-package com.eda.choreography.infra.kafka;
+package com.eda.choreography.infra;
 
 import java.util.Arrays;
 import java.util.Map;
@@ -19,9 +19,9 @@ import org.testcontainers.utility.DockerImageName;
  * than Testcontainers' default Confluent image.
  */
 @SpringBootTest
-abstract class AbstractKafkaIT {
+public abstract class AbstractInfraIT {
 
-    static final int PARTITIONS = 3;
+    protected static final int PARTITIONS = 3;
 
     private static final KafkaContainer KAFKA = new KafkaContainer(DockerImageName.parse("apache/kafka:3.7.0"));
 
@@ -38,7 +38,7 @@ abstract class AbstractKafkaIT {
      * Topics are created up front, as discovery provisions them for registered services. A step
      * container can then be assigned its partitions before the first message is sent.
      */
-    static void createTopics(String... topics) throws Exception {
+    protected static void createTopics(String... topics) throws Exception {
         try (var admin = Admin.create(Map.of(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, KAFKA.getBootstrapServers()))) {
             var newTopics = Arrays.stream(topics).map(topic -> new NewTopic(topic, PARTITIONS, (short) 1)).toList();
             admin.createTopics(newTopics).all().get();

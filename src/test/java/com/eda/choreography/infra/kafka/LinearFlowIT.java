@@ -10,6 +10,7 @@ import com.eda.choreography.domain.step.StepAction;
 import com.eda.choreography.domain.step.StepRunner;
 import com.eda.choreography.domain.trace.TraceEntry;
 import com.eda.choreography.domain.trace.TraceGraph;
+import com.eda.choreography.infra.AbstractInfraIT;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -29,7 +30,7 @@ import org.springframework.kafka.test.utils.ContainerTestUtils;
  * Each step runs in its own listener container, as it would in its own service, and the only
  * thing passing between them is the message on Kafka.
  */
-class LinearFlowIT extends AbstractKafkaIT {
+class LinearFlowIT extends AbstractInfraIT {
 
     private static final LinearFlow CHECKOUT = LinearFlow.of("checkout", "reserve", "price", "tax");
 
