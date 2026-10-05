@@ -14,7 +14,9 @@ public record JoinOutcome(Decision decision, JoinState state) {
         /** The arrival completed the join. Reported exactly once per join. */
         FIRED,
         /** This branch had already arrived; nothing changed. */
-        DUPLICATE
+        DUPLICATE,
+        /** A new branch reached a join that had already timed out; nothing changed. */
+        LATE
     }
 
     public boolean fired() {

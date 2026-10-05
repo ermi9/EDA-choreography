@@ -157,6 +157,58 @@ class JoinStateMachineTest {
         assertThat(repeat.state().branchMessages()).containsOnly(Map.entry("B", first));
     }
 
+    @Test
+    void anOpenJoinTimesOutWithTheBranchesThatDidArrive() {
+        var left = ChoreographyMessage.start("corr-1", "flow", Map.of()).recordStep("B", Map.of());
+        machine.arrive(new BranchArrival(JOIN, "B", 2, left));
+
+        var timedOut = machine.timeOut(JOIN);
+
+        assertThat(timedOut).hasValueSatisfying(state -> {
+            assertThat(state.status()).isEqualTo(JoinState.Status.TIMED_OUT);
+            assertThat(state.branchMessages()).containsOnly(Map.entry("B", left));
+        });
+    }
+
+    @Test
+    void timingOutTwiceHandsBackTheSameStateSoTheCallerCanFinishWhatItStarted() {
+        arrive("B", 2);
+
+        var first = machine.timeOut(JOIN);
+
+        assertThat(first).isPresent();
+        assertThat(machine.timeOut(JOIN)).isEqualTo(first);
+    }
+
+    @Test
+    void aJoinThatFiredOrNeverOpenedDoesNotTimeOut() {
+        arrive("B", 1);
+
+        assertThat(machine.timeOut(JOIN)).isEmpty();
+        assertThat(machine.timeOut(new JoinKey("corr-1", "never-reached"))).isEmpty();
+        assertThat(arrive("B", 1).state().fired()).isTrue();
+    }
+
+    @Test
+    void aNewBranchAfterTheTimeoutIsLateAndDoesNotReopenTheJoin() {
+        arrive("B", 2);
+        machine.timeOut(JOIN);
+
+        var late = arrive("C", 2);
+
+        assertThat(late.decision()).isEqualTo(Decision.LATE);
+        assertThat(late.state().arrivedBranches()).containsExactly("B");
+        assertThat(late.state().status()).isEqualTo(JoinState.Status.TIMED_OUT);
+    }
+
+    @Test
+    void aBranchThatArrivedBeforeTheTimeoutIsStillADuplicate() {
+        arrive("B", 2);
+        machine.timeOut(JOIN);
+
+        assertThat(arrive("B", 2).decision()).isEqualTo(Decision.DUPLICATE);
+    }
+
     private JoinOutcome arrive(String branchId, int expected) {
         return machine.arrive(arrival(branchId, expected));
     }

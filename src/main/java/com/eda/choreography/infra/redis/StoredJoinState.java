@@ -16,6 +16,7 @@ record StoredJoinState(
         int expectedBranches,
         Set<String> arrivedBranches,
         boolean fired,
+        Boolean timedOut,
         Map<String, ChoreographyMessage> branchMessages) {
 
     static StoredJoinState from(JoinState state) {
@@ -25,13 +26,19 @@ record StoredJoinState(
                 state.expectedBranches(),
                 state.arrivedBranches(),
                 state.fired(),
+                state.status() == JoinState.Status.TIMED_OUT,
                 state.branchMessages());
     }
 
-    /** A join stored before branch messages were kept reads back as one that kept none. */
+    /**
+     * Fields added after a join was stored read back as absent: such a join kept no messages and
+     * cannot have timed out.
+     */
     JoinState toDomain() {
         var messages = branchMessages == null ? Map.<String, ChoreographyMessage>of() : branchMessages;
-        var status = fired ? JoinState.Status.FIRED : JoinState.Status.OPEN;
+        var status = fired ? JoinState.Status.FIRED
+                : Boolean.TRUE.equals(timedOut) ? JoinState.Status.TIMED_OUT
+                : JoinState.Status.OPEN;
         return new JoinState(new JoinKey(correlationId, joinId), expectedBranches, arrivedBranches, status, messages);
     }
 }

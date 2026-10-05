@@ -19,7 +19,7 @@ import java.util.Set;
  * @param key              the join
  * @param expectedBranches how many distinct branches complete the join
  * @param arrivedBranches  the distinct branch ids seen so far
- * @param status           whether the join is still waiting or has fired
+ * @param status           whether the join is still waiting, has fired, or gave up
  * @param branchMessages   the message each branch arrived with, for the branches that brought
  *                         one; the join merges them when it fires
  */
@@ -34,7 +34,9 @@ public record JoinState(
         /** Waiting for branches. */
         OPEN,
         /** Every branch arrived and the join fired. */
-        FIRED
+        FIRED,
+        /** The join gave up waiting; it will not fire. */
+        TIMED_OUT
     }
 
     public JoinState {
@@ -100,6 +102,10 @@ public record JoinState(
             messages.putIfAbsent(branchId, message);
         }
         return new JoinState(key, expectedBranches, arrived, status, messages);
+    }
+
+    JoinState markTimedOut() {
+        return new JoinState(key, expectedBranches, arrivedBranches, Status.TIMED_OUT, branchMessages);
     }
 
     JoinState markFired() {

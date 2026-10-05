@@ -47,6 +47,15 @@ public interface JoinStateStoreContract {
     }
 
     @Test
+    default void returnsATimedOutJoinAsTimedOut() {
+        var state = new JoinState(JOIN, 2, Set.of("B"), JoinState.Status.TIMED_OUT, Map.of());
+
+        store().save(state);
+
+        assertThat(store().find(JOIN)).contains(state);
+    }
+
+    @Test
     default void laterSaveReplacesEarlierOne() {
         store().save(new JoinState(JOIN, 2, Set.of("B"), false));
         var fired = new JoinState(JOIN, 2, Set.of("B", "C"), true);
