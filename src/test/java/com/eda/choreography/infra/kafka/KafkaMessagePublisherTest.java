@@ -48,7 +48,7 @@ class KafkaMessagePublisherTest {
 
     @Test
     void returnsOnlyOnceTheBrokerHasAcceptedAndReportsAFailedSend() {
-        var producer = new MockProducer<>(false, null, new StringSerializer(), MessageWireFormat.serializer());
+        var producer = new MockProducer<>(false, null, new StringSerializer(), MessageWireFormat.<ChoreographyMessage>serializer());
         failTheNextSendWithin5Seconds(producer);
 
         assertThatThrownBy(() -> publisherOn(producer).publish("B", message))
@@ -68,7 +68,7 @@ class KafkaMessagePublisherTest {
     }
 
     private static MockProducer<String, ChoreographyMessage> autoCompletingProducer() {
-        return new MockProducer<>(true, null, new StringSerializer(), MessageWireFormat.serializer());
+        return new MockProducer<>(true, null, new StringSerializer(), MessageWireFormat.<ChoreographyMessage>serializer());
     }
 
     private static KafkaMessagePublisher publisherOn(MockProducer<String, ChoreographyMessage> producer) {

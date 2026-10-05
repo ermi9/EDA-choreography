@@ -8,7 +8,8 @@ import org.springframework.kafka.support.serializer.JacksonJsonDeserializer;
 import org.springframework.kafka.support.serializer.JacksonJsonSerializer;
 
 /**
- * How a {@link ChoreographyMessage} looks on a Kafka topic: plain JSON of the record's fields.
+ * How a {@link ChoreographyMessage}, or a compensation request carrying one, looks on a Kafka
+ * topic: plain JSON of the record's fields.
  *
  * <p>The JSON schema is the contract. No Java type header is written or read, so a service
  * built from another codebase can take part with its own DTO. Unknown fields are ignored
@@ -19,8 +20,8 @@ final class MessageWireFormat {
     private MessageWireFormat() {
     }
 
-    static Serializer<ChoreographyMessage> serializer() {
-        return new JacksonJsonSerializer<ChoreographyMessage>().noTypeInfo();
+    static <T> Serializer<T> serializer() {
+        return new JacksonJsonSerializer<T>().noTypeInfo();
     }
 
     /**
@@ -29,7 +30,10 @@ final class MessageWireFormat {
      * listener container then skips it rather than redelivering it forever.
      */
     static Deserializer<ChoreographyMessage> deserializer() {
-        return new ErrorHandlingDeserializer<>(
-                new JacksonJsonDeserializer<>(ChoreographyMessage.class).ignoreTypeHeaders());
+        return deserializer(ChoreographyMessage.class);
+    }
+
+    static <T> Deserializer<T> deserializer(Class<T> type) {
+        return new ErrorHandlingDeserializer<>(new JacksonJsonDeserializer<>(type).ignoreTypeHeaders());
     }
 }

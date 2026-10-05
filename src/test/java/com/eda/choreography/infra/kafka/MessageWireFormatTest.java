@@ -2,6 +2,7 @@ package com.eda.choreography.infra.kafka;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.eda.choreography.domain.compensation.CompensationRequest;
 import com.eda.choreography.domain.message.ChoreographyMessage;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
@@ -25,6 +26,27 @@ class MessageWireFormatTest {
         var bytes = MessageWireFormat.serializer().serialize(TOPIC, headers, message);
 
         assertThat(MessageWireFormat.deserializer().deserialize(TOPIC, headers, bytes)).isEqualTo(message);
+    }
+
+    @Test
+    void aFailedStepSurvivesTheWire() {
+        var failed = message.recordFailure("C");
+        var bytes = MessageWireFormat.serializer().serialize(TOPIC, new RecordHeaders(), failed);
+
+        assertThat(MessageWireFormat.deserializer().deserialize(TOPIC, new RecordHeaders(), bytes)).isEqualTo(failed);
+    }
+
+    @Test
+    void aCompensationRequestSurvivesTheWireWithItsSchemaFieldNames() {
+        var failed = message.recordFailure("C");
+        var request = new CompensationRequest("run-1", failed.trace().get(1).id(), "run-1", failed);
+
+        var bytes = MessageWireFormat.serializer().serialize("B.compensate", new RecordHeaders(), request);
+
+        assertThat(JsonMapper.builder().build().readTree(bytes).propertyNames())
+                .containsExactlyInAnyOrder("runId", "entryId", "previousId", "instance");
+        assertThat(MessageWireFormat.deserializer(CompensationRequest.class)
+                .deserialize("B.compensate", new RecordHeaders(), bytes)).isEqualTo(request);
     }
 
     @Test
