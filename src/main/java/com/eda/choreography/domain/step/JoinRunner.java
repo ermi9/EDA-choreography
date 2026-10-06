@@ -14,6 +14,7 @@ import java.time.Clock;
 import java.time.Duration;
 import java.util.Map;
 import java.util.Objects;
+import java.util.function.Consumer;
 
 /**
  * The service that runs a join step: it collects the branches of a fork and runs the step once,
@@ -76,6 +77,20 @@ public final class JoinRunner {
      * deadline, in case an earlier run stopped between opening the join and setting it.
      */
     public void handle(ChoreographyMessage branch) {
+        arrive(branch, step::handle);
+    }
+
+    /**
+     * Gives up on the join step for this branch's instance, after the adapter ran out of
+     * retries. The branch is taken as in {@link #handle}, but once the join has fired the step
+     * fails on the merged message instead of running (see {@link StepRunner#fail}). If the
+     * retries ran out before the join fired, this simply tries the arrival once more.
+     */
+    public void fail(ChoreographyMessage branch) {
+        arrive(branch, step::fail);
+    }
+
+    private void arrive(ChoreographyMessage branch, Consumer<ChoreographyMessage> whenFired) {
         var branchId = lastEntryOf(branch).id();
         var key = new JoinKey(branch.correlationId(), stepId());
         var outcome = joins.arrive(new BranchArrival(key, branchId, expectedBranches, branch));
@@ -96,7 +111,7 @@ public final class JoinRunner {
             compensations.trigger(merged, "join-failed:" + stepId());
             return;
         }
-        step.handle(merged);
+        whenFired.accept(merged);
     }
 
     /**

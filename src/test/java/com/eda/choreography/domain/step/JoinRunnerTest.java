@@ -123,6 +123,34 @@ class JoinRunnerTest {
     }
 
     @Test
+    void aJoinStepThatGivesUpUndoesEveryBranch() {
+        join.handle(FROM_B);
+        join.handle(FROM_C);
+        publisher.sent.clear();
+
+        join.fail(FROM_C);
+
+        var failed = ChoreographyMessage.merge(List.of(FROM_B, FROM_C)).recordFailure("J");
+        var failure = failed.trace().stream().filter(entry -> entry.stepId().equals("J")).findFirst().orElseThrow();
+        assertThat(publisher.sent).isEmpty();
+        assertThat(compensations.requests).extracting(RecordingCompensations.Sent::stepId)
+                .containsExactlyInAnyOrder("B", "C");
+        assertThat(compensations.requests).allSatisfy(sent -> {
+            assertThat(sent.request().runId()).isEqualTo(failure.id());
+            assertThat(sent.request().instance()).isEqualTo(failed);
+        });
+    }
+
+    @Test
+    void givingUpBeforeTheJoinFiredStillCountsTheBranch() {
+        join.fail(FROM_B);
+        join.handle(FROM_C);
+
+        assertThat(publisher.sent).singleElement().satisfies(sent -> assertThat(sent.stepId()).isEqualTo("D"));
+        assertThat(compensations.requests).isEmpty();
+    }
+
+    @Test
     void aTimeoutUndoesTheBranchesThatArrived() {
         join.handle(FROM_B);
 
