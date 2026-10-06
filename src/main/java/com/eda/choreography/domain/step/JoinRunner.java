@@ -14,7 +14,9 @@ import java.time.Clock;
 import java.time.Duration;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.function.Consumer;
+import java.util.stream.Collectors;
 
 /**
  * The service that runs a join step: it collects the branches of a fork and runs the step once,
@@ -26,7 +28,8 @@ import java.util.function.Consumer;
  *
  * <p>A join that waits too long is timed out. The first branch to arrive sets the join's
  * deadline; when it passes, a sweeper has {@link #timeOut} called for the instance. The branches
- * that did arrive are undone then, and a branch that arrives later undoes itself.
+ * that did arrive are undone then, and a branch that arrives later undoes only what the
+ * timeout did not: its own steps after the fork.
  */
 public final class JoinRunner {
 
@@ -95,7 +98,7 @@ public final class JoinRunner {
         var key = new JoinKey(branch.correlationId(), stepId());
         var outcome = joins.arrive(new BranchArrival(key, branchId, expectedBranches, branch));
         if (outcome.decision() == Decision.LATE) {
-            compensations.trigger(branch, "join-late:" + branchId);
+            compensations.trigger(branch, "join-late:" + branchId, undoneByTimeout(outcome.state()));
             return;
         }
         if (outcome.state().status() == JoinState.Status.OPEN) {
@@ -123,6 +126,18 @@ public final class JoinRunner {
         joins.timeOut(new JoinKey(correlationId, stepId()))
                 .filter(state -> !state.branchMessages().isEmpty())
                 .ifPresent(state -> compensations.trigger(merge(state), "join-timeout:" + stepId()));
+    }
+
+    /**
+     * What the join's timeout compensation undoes: every entry of the branches that had
+     * arrived, which includes the steps before the fork. A late branch leaves those out and
+     * undoes only its own steps.
+     */
+    private static Set<String> undoneByTimeout(JoinState timedOut) {
+        if (timedOut.branchMessages().isEmpty()) {
+            return Set.of();
+        }
+        return merge(timedOut).trace().stream().map(TraceEntry::id).collect(Collectors.toUnmodifiableSet());
     }
 
     /** Branches are merged in branch id order, so every run of the join merges them alike. */

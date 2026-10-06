@@ -9,12 +9,14 @@ import com.eda.choreography.domain.join.InMemoryJoinStateStore;
 import com.eda.choreography.domain.join.JoinKey;
 import com.eda.choreography.domain.join.JoinStateMachine;
 import com.eda.choreography.domain.message.ChoreographyMessage;
+import com.eda.choreography.domain.trace.TraceEntry;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 import org.junit.jupiter.api.Test;
 
 /** A fork from A into B and C, joined at J, which hands on to D. */
@@ -165,7 +167,7 @@ class JoinRunnerTest {
     }
 
     @Test
-    void aBranchThatArrivesAfterTheTimeoutUndoesItself() {
+    void aBranchThatArrivesAfterTheTimeoutUndoesOnlyWhatTheTimeoutDidNot() {
         join.handle(FROM_B);
         join.timeOut("order-42");
         compensations.requests.clear();
@@ -173,11 +175,13 @@ class JoinRunnerTest {
         join.handle(FROM_C);
 
         var cEntry = FROM_C.trace().get(1);
+        var undoneByTimeout = FROM_B.trace().stream().map(TraceEntry::id).collect(Collectors.toSet());
         assertThat(publisher.sent).isEmpty();
         assertThat(compensations.requests).singleElement().satisfies(sent -> {
             assertThat(sent.stepId()).isEqualTo("C");
             assertThat(sent.request().runId()).isEqualTo("join-late:" + cEntry.id());
             assertThat(sent.request().instance()).isEqualTo(FROM_C);
+            assertThat(sent.request().alreadyUndone()).isEqualTo(undoneByTimeout);
         });
     }
 

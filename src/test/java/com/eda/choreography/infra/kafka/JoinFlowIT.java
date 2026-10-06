@@ -51,7 +51,7 @@ class JoinFlowIT extends AbstractFlowIT {
     }
 
     @Test
-    void aJoinThatWaitsTooLongUndoesWhatArrivedAndALateBranchUndoesItself() throws Exception {
+    void aJoinThatWaitsTooLongUndoesWhatArrivedAndALateBranchUndoesOnlyItsOwnSteps() throws Exception {
         var a = unique("a");
         var b = unique("b");
         var c = unique("c");
@@ -75,7 +75,8 @@ class JoinFlowIT extends AbstractFlowIT {
             var late = await(outcomes, compensatedTopic, correlationId, WAIT);
 
             assertThat(late.trace()).extracting(TraceEntry::stepId).containsExactlyInAnyOrder(a, c);
-            assertThat(undone).containsExactly(b, a, c, a);
+            // a was undone by the timeout already; the late branch only undoes c.
+            assertThat(undone).containsExactly(b, a, c);
             assertThat(more(outcomes, completedTopic, List.of(correlationId), Duration.ofSeconds(1))).isEmpty();
         }
     }
