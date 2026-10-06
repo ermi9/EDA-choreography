@@ -3,6 +3,7 @@ package com.eda.choreography.infra.kafka;
 import com.eda.choreography.domain.compensation.CompensationPublisher;
 import com.eda.choreography.domain.compensation.CompensationRequest;
 import com.eda.choreography.domain.compensation.CompensationTrigger;
+import com.eda.choreography.domain.join.JoinTimeoutNotices;
 import com.eda.choreography.domain.message.ChoreographyMessage;
 import com.eda.choreography.domain.step.MessagePublisher;
 import java.util.Map;
@@ -75,6 +76,11 @@ public class KafkaConfig {
             KafkaTemplate<String, ChoreographyMessage> template,
             @Value("${choreography.kafka.completed-topic}") String completedTopic) {
         return new KafkaMessagePublisher(template, completedTopic);
+    }
+
+    @Bean
+    JoinTimeoutNotices joinTimeoutNotices(KafkaTemplate<String, ChoreographyMessage> template) {
+        return new KafkaJoinTimeoutNotices(template);
     }
 
     @Bean
