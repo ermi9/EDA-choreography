@@ -20,13 +20,19 @@ import java.util.Set;
  * ready together share a stage with no order between them.
  *
  * <p>Failed entries take part in the ordering (they are nodes of the graph) but are left out
- * of the stages: a failed step committed nothing, so there is nothing to undo.
+ * of the stages: a failed step committed nothing, so there is nothing to undo. Entries an
+ * earlier compensation of the same instance already undid are left out the same way.
  */
 public final class CompensationOrdering {
 
     private CompensationOrdering() {}
 
     public static CompensationOrder of(TraceGraph trace) {
+        return of(trace, Set.of());
+    }
+
+    /** As {@link #of(TraceGraph)}, leaving out the entries whose ids are in {@code alreadyUndone}. */
+    public static CompensationOrder of(TraceGraph trace, Set<String> alreadyUndone) {
         var pendingChildren = new HashMap<String, Integer>();
         var wave = new ArrayList<TraceEntry>();
         for (var entry : trace.entries()) {
@@ -39,7 +45,7 @@ public final class CompensationOrdering {
 
         var stages = new ArrayList<Set<TraceEntry>>();
         while (!wave.isEmpty()) {
-            var stage = compensable(wave);
+            var stage = compensable(wave, alreadyUndone);
             if (!stage.isEmpty()) {
                 stages.add(stage);
             }
@@ -57,10 +63,11 @@ public final class CompensationOrdering {
     }
 
     /** The wave's entries that need undoing, in id order so logs and replays are reproducible. */
-    private static Set<TraceEntry> compensable(List<TraceEntry> wave) {
+    private static Set<TraceEntry> compensable(List<TraceEntry> wave, Set<String> alreadyUndone) {
         var stage = new LinkedHashSet<TraceEntry>();
         wave.stream()
                 .filter(TraceEntry::needsCompensation)
+                .filter(entry -> !alreadyUndone.contains(entry.id()))
                 .sorted(Comparator.comparing(TraceEntry::id))
                 .forEach(stage::add);
         return Collections.unmodifiableSet(stage);

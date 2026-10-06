@@ -132,6 +132,19 @@ class CompensationOrderingTest {
     }
 
     @Test
+    void entriesAnEarlierCompensationUndidAreLeftOutWithoutChangingTheRest() {
+        // A late branch C after a timed-out join whose compensation already undid B and A.
+        var a = done("A");
+        var b = done("B", "A");
+        var c = done("C", "A");
+        var d = done("D", "C");
+
+        var order = CompensationOrdering.of(TraceGraph.of(List.of(a, b, c, d)), Set.of("A", "B"));
+
+        assertThat(order.stages()).containsExactly(Set.of(d), Set.of(c));
+    }
+
+    @Test
     void emptyTraceAndAllFailedTraceHaveNothingToUndo() {
         assertThat(CompensationOrdering.of(TraceGraph.of(List.of())).isEmpty()).isTrue();
         assertThat(orderOf(failed("A")).isEmpty()).isTrue();
