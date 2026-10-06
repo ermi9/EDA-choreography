@@ -43,11 +43,17 @@ public abstract class AbstractInfraIT {
 
     /**
      * Topics are created up front, as discovery provisions them for registered services. A step
-     * container can then be assigned its partitions before the first message is sent.
+     * container can then be assigned its partitions before the first message is sent. Topics
+     * that already exist, such as the shared completed topic, are left as they are.
      */
     protected static void createTopics(String... topics) throws Exception {
         try (var admin = Admin.create(Map.of(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, KAFKA.getBootstrapServers()))) {
-            var newTopics = Arrays.stream(topics).map(topic -> new NewTopic(topic, PARTITIONS, (short) 1)).toList();
+            var existing = admin.listTopics().names().get();
+            var newTopics = Arrays.stream(topics)
+                    .distinct()
+                    .filter(topic -> !existing.contains(topic))
+                    .map(topic -> new NewTopic(topic, PARTITIONS, (short) 1))
+                    .toList();
             admin.createTopics(newTopics).all().get();
         }
     }

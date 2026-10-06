@@ -100,8 +100,10 @@ public class KafkaConfig {
     }
 
     @Bean
-    StepContainerFactory stepContainerFactory(ConsumerFactory<String, ChoreographyMessage> consumerFactory) {
-        return new StepContainerFactory(consumerFactory);
+    StepContainerFactory stepContainerFactory(
+            ConsumerFactory<String, ChoreographyMessage> messages,
+            ConsumerFactory<String, CompensationRequest> requests) {
+        return new StepContainerFactory(messages, requests);
     }
 
     /**
