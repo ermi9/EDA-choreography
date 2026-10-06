@@ -47,7 +47,7 @@ public final class CompensationRunner {
             throw new IllegalArgumentException(
                     "step " + stepId + " was asked to undo entry " + entry.id() + " of step " + entry.stepId());
         }
-        var stages = CompensationOrdering.of(TraceGraph.of(request.instance().trace())).stages();
+        var stages = CompensationOrdering.of(TraceGraph.of(request.instance().trace()), request.alreadyUndone()).stages();
         int stage = 0;
         while (!stages.get(stage).contains(entry)) {
             stage++;
@@ -66,7 +66,8 @@ public final class CompensationRunner {
             return;
         }
         for (var next : stages.get(stage + 1)) {
-            publisher.publish(next.stepId(), new CompensationRequest(request.runId(), next.id(), entry.id(), request.instance()));
+            publisher.publish(next.stepId(), new CompensationRequest(
+                    request.runId(), next.id(), entry.id(), request.instance(), request.alreadyUndone()));
         }
     }
 }

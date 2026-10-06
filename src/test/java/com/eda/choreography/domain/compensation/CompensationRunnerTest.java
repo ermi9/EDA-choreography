@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.eda.choreography.domain.join.InMemoryJoinStateStore;
 import com.eda.choreography.domain.join.JoinStateMachine;
 import com.eda.choreography.domain.message.ChoreographyMessage;
+import com.eda.choreography.domain.message.MalformedMessageException;
 import com.eda.choreography.domain.trace.TraceEntry;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -13,6 +14,7 @@ import java.util.Deque;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -86,6 +88,29 @@ class CompensationRunnerTest {
         bus.deliverAll();
 
         assertThat(bus.undone).filteredOn("A"::equals).hasSize(2);
+    }
+
+    @Test
+    void aSecondRunLeavesOutWhatTheFirstAlreadyUndid() {
+        // A late branch C after the join timed out and its compensation undid B and A.
+        var forked = start().recordStep("A", Map.of());
+        var lateBranch = forked.recordStep("C", Map.of()).recordStep("D", Map.of());
+        var a = forked.trace().get(0).id();
+
+        new CompensationTrigger(bus).trigger(lateBranch, "late", Set.of(a));
+        bus.deliverAll();
+
+        assertThat(bus.undone).containsExactly("D", "C");
+        assertThat(bus.compensated).containsExactly(lateBranch);
+    }
+
+    @Test
+    void aRequestToUndoAnEntryThatWasAlreadyUndoneIsRejected() {
+        var instance = start().recordStep("A", Map.of());
+        var a = instance.trace().get(0).id();
+
+        assertThatThrownBy(() -> new CompensationRequest("run-1", a, "run-1", instance, Set.of(a)))
+                .isInstanceOf(MalformedMessageException.class);
     }
 
     @Test

@@ -3,6 +3,7 @@ package com.eda.choreography.domain.compensation;
 import com.eda.choreography.domain.message.ChoreographyMessage;
 import com.eda.choreography.domain.trace.TraceGraph;
 import java.util.Objects;
+import java.util.Set;
 
 /**
  * Starts undoing an instance: asks every entry of the first compensation stage to undo itself.
@@ -22,13 +23,21 @@ public final class CompensationTrigger {
      *                 requests, so triggering twice is harmless
      */
     public void trigger(ChoreographyMessage instance, String runId) {
-        var order = CompensationOrdering.of(TraceGraph.of(instance.trace()));
+        trigger(instance, runId, Set.of());
+    }
+
+    /**
+     * As {@link #trigger(ChoreographyMessage, String)}, for an instance part of which an earlier
+     * compensation already undid: those entries are left out, and the rest keep their order.
+     */
+    public void trigger(ChoreographyMessage instance, String runId, Set<String> alreadyUndone) {
+        var order = CompensationOrdering.of(TraceGraph.of(instance.trace()), alreadyUndone);
         if (order.isEmpty()) {
             publisher.publishCompensated(instance);
             return;
         }
         for (var entry : order.stages().get(0)) {
-            publisher.publish(entry.stepId(), new CompensationRequest(runId, entry.id(), runId, instance));
+            publisher.publish(entry.stepId(), new CompensationRequest(runId, entry.id(), runId, instance, alreadyUndone));
         }
     }
 }

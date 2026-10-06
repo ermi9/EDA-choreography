@@ -7,6 +7,7 @@ import com.eda.choreography.domain.message.ChoreographyMessage;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import org.apache.kafka.common.header.internals.RecordHeaders;
 import org.junit.jupiter.api.Test;
 import org.springframework.kafka.support.serializer.SerializationUtils;
@@ -39,14 +40,32 @@ class MessageWireFormatTest {
     @Test
     void aCompensationRequestSurvivesTheWireWithItsSchemaFieldNames() {
         var failed = message.recordFailure("C");
-        var request = new CompensationRequest("run-1", failed.trace().get(1).id(), "run-1", failed);
+        var request = new CompensationRequest(
+                "run-1", failed.trace().get(1).id(), "run-1", failed, Set.of(failed.trace().get(0).id()));
 
         var bytes = MessageWireFormat.serializer().serialize("B.compensate", new RecordHeaders(), request);
 
         assertThat(JsonMapper.builder().build().readTree(bytes).propertyNames())
-                .containsExactlyInAnyOrder("runId", "entryId", "previousId", "instance");
+                .containsExactlyInAnyOrder("runId", "entryId", "previousId", "instance", "alreadyUndone");
         assertThat(MessageWireFormat.deserializer(CompensationRequest.class)
                 .deserialize("B.compensate", new RecordHeaders(), bytes)).isEqualTo(request);
+    }
+
+    @Test
+    void aCompensationRequestWithoutAlreadyUndoneLeavesNothingOut() {
+        // Requests written before the field existed, or by a service that never sends it.
+        var failed = message.recordFailure("C");
+        var request = new CompensationRequest("run-1", failed.trace().get(1).id(), "run-1", failed);
+        var json = JsonMapper.builder().build();
+        var tree = (tools.jackson.databind.node.ObjectNode) json.readTree(
+                MessageWireFormat.serializer().serialize("B.compensate", new RecordHeaders(), request));
+        tree.remove("alreadyUndone");
+
+        var read = MessageWireFormat.deserializer(CompensationRequest.class)
+                .deserialize("B.compensate", new RecordHeaders(), json.writeValueAsBytes(tree));
+
+        assertThat(read).isEqualTo(request);
+        assertThat(read.alreadyUndone()).isEmpty();
     }
 
     @Test
