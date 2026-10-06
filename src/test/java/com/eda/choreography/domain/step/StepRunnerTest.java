@@ -3,11 +3,9 @@ package com.eda.choreography.domain.step;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import com.eda.choreography.domain.compensation.CompensationPublisher;
 import com.eda.choreography.domain.compensation.CompensationRequest;
 import com.eda.choreography.domain.compensation.CompensationTrigger;
 import com.eda.choreography.domain.message.ChoreographyMessage;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -146,24 +144,5 @@ class StepRunnerTest {
     void rejectsABlankStepId() {
         assertThatThrownBy(() -> new StepRunner(" ", message -> Map.of(), FLOW, publisher, trigger))
                 .isInstanceOf(IllegalArgumentException.class);
-    }
-
-    /** Test double: keeps what the compensation trigger sends. */
-    private static final class RecordingCompensations implements CompensationPublisher {
-
-        record Sent(String stepId, CompensationRequest request) {}
-
-        final List<Sent> requests = new ArrayList<>();
-        final List<ChoreographyMessage> compensated = new ArrayList<>();
-
-        @Override
-        public void publish(String stepId, CompensationRequest request) {
-            requests.add(new Sent(stepId, request));
-        }
-
-        @Override
-        public void publishCompensated(ChoreographyMessage instance) {
-            compensated.add(instance);
-        }
     }
 }

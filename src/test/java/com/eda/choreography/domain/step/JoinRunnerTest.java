@@ -1,0 +1,158 @@
+package com.eda.choreography.domain.step;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
+import com.eda.choreography.domain.compensation.CompensationTrigger;
+import com.eda.choreography.domain.join.InMemoryJoinStateStore;
+import com.eda.choreography.domain.join.JoinStateMachine;
+import com.eda.choreography.domain.message.ChoreographyMessage;
+import java.util.List;
+import java.util.Map;
+import org.junit.jupiter.api.Test;
+
+/** A fork from A into B and C, joined at J, which hands on to D. */
+class JoinRunnerTest {
+
+    private static final ChoreographyMessage FORKED =
+            ChoreographyMessage.start("order-42", "checkout", Map.of()).recordStep("A", Map.of("quantity", 10));
+    private static final ChoreographyMessage FROM_B = FORKED.recordStep("B", Map.of("amount", 30));
+    private static final ChoreographyMessage FROM_C = FORKED.recordStep("C", Map.of("slot", "monday"));
+    private static final Map<String, Object> JOINED = Map.of("ready", true);
+
+    private final RecordingPublisher publisher = new RecordingPublisher();
+    private final RecordingCompensations compensations = new RecordingCompensations();
+    private final CompensationTrigger trigger = new CompensationTrigger(compensations);
+    private final JoinStateMachine joins = new JoinStateMachine(new InMemoryJoinStateStore());
+    private final JoinRunner join = new JoinRunner(
+            new StepRunner("J", message -> JOINED, (stepId, message) -> List.of("D"), publisher, trigger),
+            2, joins, trigger);
+
+    @Test
+    void runsTheStepOnceEveryBranchHasArrived() {
+        join.handle(FROM_B);
+        assertThat(publisher.sent).isEmpty();
+
+        join.handle(FROM_C);
+
+        var merged = ChoreographyMessage.merge(List.of(FROM_B, FROM_C));
+        assertThat(publisher.sent).singleElement().satisfies(sent -> {
+            assertThat(sent.stepId()).isEqualTo("D");
+            assertThat(sent.message()).isEqualTo(merged.recordStep("J", JOINED));
+        });
+        assertThat(compensations.requests).isEmpty();
+    }
+
+    @Test
+    void theJoinedMessageDoesNotDependOnWhichBranchArrivedFirst() {
+        // A ran twice before the fork and answered differently, so the branches disagree on its result.
+        var fromC = ChoreographyMessage.start("order-42", "checkout", Map.of())
+                .recordStep("A", Map.of("quantity", 11))
+                .recordStep("C", Map.of("slot", "monday"));
+
+        assertThat(joined(FROM_B, fromC)).isEqualTo(joined(fromC, FROM_B));
+    }
+
+    @Test
+    void aBranchDeliveredTwiceBeforeTheJoinFiresIsCountedOnce() {
+        join.handle(FROM_B);
+        join.handle(FROM_B);
+
+        assertThat(publisher.sent).isEmpty();
+    }
+
+    @Test
+    void aBranchRedeliveredAfterTheJoinFiredRunsTheStepAgainWithTheSameResult() {
+        // The first run may have crashed after the join fired but before handing on.
+        join.handle(FROM_B);
+        join.handle(FROM_C);
+
+        join.handle(FROM_C);
+
+        assertThat(publisher.sent).hasSize(2);
+        assertThat(publisher.sent.get(1)).isEqualTo(publisher.sent.get(0));
+    }
+
+    @Test
+    void aFailedBranchWaitsForTheOthersAndThenUndoesThemAll() {
+        var failedB = FORKED.recordFailure("B");
+        join.handle(failedB);
+        assertThat(compensations.requests).isEmpty();
+
+        join.handle(FROM_C);
+
+        assertThat(publisher.sent).isEmpty();
+        assertThat(compensations.requests).singleElement().satisfies(sent -> {
+            assertThat(sent.stepId()).isEqualTo("C");
+            assertThat(sent.request().runId()).isEqualTo("join-failed:J");
+            assertThat(sent.request().instance()).isEqualTo(ChoreographyMessage.merge(List.of(failedB, FROM_C)));
+        });
+    }
+
+    @Test
+    void aTimeoutUndoesTheBranchesThatArrived() {
+        join.handle(FROM_B);
+
+        join.timeOut("order-42");
+
+        assertThat(publisher.sent).isEmpty();
+        assertThat(compensations.requests).singleElement().satisfies(sent -> {
+            assertThat(sent.stepId()).isEqualTo("B");
+            assertThat(sent.request().runId()).isEqualTo("join-timeout:J");
+            assertThat(sent.request().instance()).isEqualTo(FROM_B);
+        });
+    }
+
+    @Test
+    void aBranchThatArrivesAfterTheTimeoutUndoesItself() {
+        join.handle(FROM_B);
+        join.timeOut("order-42");
+        compensations.requests.clear();
+
+        join.handle(FROM_C);
+
+        var cEntry = FROM_C.trace().get(1);
+        assertThat(publisher.sent).isEmpty();
+        assertThat(compensations.requests).singleElement().satisfies(sent -> {
+            assertThat(sent.stepId()).isEqualTo("C");
+            assertThat(sent.request().runId()).isEqualTo("join-late:" + cEntry.id());
+            assertThat(sent.request().instance()).isEqualTo(FROM_C);
+        });
+    }
+
+    @Test
+    void aTimeoutAfterTheJoinFiredChangesNothing() {
+        join.handle(FROM_B);
+        join.handle(FROM_C);
+
+        join.timeOut("order-42");
+
+        assertThat(compensations.requests).isEmpty();
+    }
+
+    @Test
+    void aTimeoutForAJoinNoBranchReachedChangesNothing() {
+        join.timeOut("order-42");
+
+        assertThat(compensations.requests).isEmpty();
+        assertThat(compensations.compensated).isEmpty();
+    }
+
+    @Test
+    void rejectsAMessageThatDoesNotEndInOneBranch() {
+        var unmerged = ChoreographyMessage.merge(List.of(FROM_B, FROM_C));
+
+        assertThatThrownBy(() -> join.handle(unmerged)).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    /** What a fresh join hands on after the two branches arrive in the given order. */
+    private ChoreographyMessage joined(ChoreographyMessage first, ChoreographyMessage second) {
+        var sent = new RecordingPublisher();
+        var fresh = new JoinRunner(
+                new StepRunner("J", message -> JOINED, (stepId, message) -> List.of("D"), sent, trigger),
+                2, new JoinStateMachine(new InMemoryJoinStateStore()), trigger);
+        fresh.handle(first);
+        fresh.handle(second);
+        return sent.sent.get(0).message();
+    }
+}
