@@ -3,6 +3,7 @@ package com.eda.choreography.infra.kafka;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.eda.choreography.domain.compensation.CompensationOrdering;
+import com.eda.choreography.domain.compensation.CompensationTrigger;
 import com.eda.choreography.domain.message.ChoreographyMessage;
 import com.eda.choreography.domain.step.LinearFlow;
 import com.eda.choreography.domain.step.MessagePublisher;
@@ -47,6 +48,9 @@ class LinearFlowIT extends AbstractInfraIT {
     MessagePublisher publisher;
 
     @Autowired
+    CompensationTrigger compensations;
+
+    @Autowired
     ConsumerFactory<String, ChoreographyMessage> consumerFactory;
 
     @Value("${choreography.kafka.completed-topic}")
@@ -63,7 +67,7 @@ class LinearFlowIT extends AbstractInfraIT {
     void aLinearFlowRunsEndToEndAndArrivesWithTheAccumulatedResult() throws Exception {
         createTopics("reserve.in", "price.in", "tax.in", completedTopic);
         for (var step : CHECKOUT.steps()) {
-            startStep(new StepRunner(step, ACTIONS.get(step), CHECKOUT, publisher));
+            startStep(new StepRunner(step, ACTIONS.get(step), CHECKOUT, publisher, compensations));
         }
         var correlationId = "order-" + UUID.randomUUID();
 
