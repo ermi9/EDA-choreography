@@ -13,6 +13,7 @@ class RecordingCompensations implements CompensationPublisher {
 
     final List<Sent> requests = new ArrayList<>();
     final List<ChoreographyMessage> compensated = new ArrayList<>();
+    final List<CompensationRequest> failed = new ArrayList<>();
 
     @Override
     public void publish(String stepId, CompensationRequest request) {
@@ -22,5 +23,10 @@ class RecordingCompensations implements CompensationPublisher {
     @Override
     public void publishCompensated(ChoreographyMessage instance) {
         compensated.add(instance);
+    }
+
+    @Override
+    public void publishFailed(CompensationRequest request) {
+        failed.add(request);
     }
 }

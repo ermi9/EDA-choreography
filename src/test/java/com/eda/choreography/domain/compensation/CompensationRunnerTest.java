@@ -114,6 +114,20 @@ class CompensationRunnerTest {
     }
 
     @Test
+    void anEntryThatCannotBeUndoneIsParkedAndTheEarlierStepsWait() {
+        var failedInstance = start().recordStep("A", Map.of()).recordStep("B", Map.of()).recordFailure("C");
+        new CompensationTrigger(bus).trigger(failedInstance, "run-1");
+        var request = bus.pending.removeFirst();
+
+        bus.runners.get("B").giveUp(request);
+
+        assertThat(bus.failed).containsExactly(request);
+        assertThat(bus.pending).isEmpty();
+        assertThat(bus.undone).isEmpty();
+        assertThat(bus.compensated).isEmpty();
+    }
+
+    @Test
     void aServiceOnlyUndoesItsOwnSteps() {
         var instance = start().recordStep("A", Map.of());
         var request = new CompensationRequest("run-1", instance.trace().get(0).id(), "run-1", instance);
@@ -133,6 +147,7 @@ class CompensationRunnerTest {
         final Deque<CompensationRequest> pending = new ArrayDeque<>();
         final List<String> undone = new ArrayList<>();
         final List<ChoreographyMessage> compensated = new ArrayList<>();
+        final List<CompensationRequest> failed = new ArrayList<>();
 
         Bus() {
             for (var step : List.of("A", "B", "C", "D")) {
@@ -152,6 +167,11 @@ class CompensationRunnerTest {
         @Override
         public void publishCompensated(ChoreographyMessage instance) {
             compensated.add(instance);
+        }
+
+        @Override
+        public void publishFailed(CompensationRequest request) {
+            failed.add(request);
         }
 
         void deliverOne() {

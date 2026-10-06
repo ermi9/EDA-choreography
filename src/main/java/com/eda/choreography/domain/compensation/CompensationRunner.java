@@ -18,6 +18,9 @@ import java.util.Objects;
  *
  * <p>A request that arrives again after the entry was undone is handled again. The first run may
  * have stopped between undoing and handing on, and the undo is idempotent.
+ *
+ * <p>An entry that cannot be undone, even after retrying, is parked (see {@link #giveUp}). The
+ * stages after it then wait: an earlier step must not be undone while a later one still holds.
  */
 public final class CompensationRunner {
 
@@ -69,5 +72,14 @@ public final class CompensationRunner {
             publisher.publish(next.stepId(), new CompensationRequest(
                     request.runId(), next.id(), entry.id(), request.instance(), request.alreadyUndone()));
         }
+    }
+
+    /**
+     * Gives up on undoing the request's entry, after the adapter ran out of retries, and parks
+     * the request for an operator. Nothing is handed on, so the rest of the instance stays as it
+     * is until the request is retried.
+     */
+    public void giveUp(CompensationRequest request) {
+        publisher.publishFailed(request);
     }
 }

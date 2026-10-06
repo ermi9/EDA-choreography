@@ -62,8 +62,9 @@ public class KafkaConfig {
     CompensationPublisher compensationPublisher(
             KafkaTemplate<String, CompensationRequest> requests,
             KafkaTemplate<String, ChoreographyMessage> messages,
-            @Value("${choreography.kafka.compensated-topic}") String compensatedTopic) {
-        return new KafkaCompensationPublisher(requests, messages, compensatedTopic);
+            @Value("${choreography.kafka.compensated-topic}") String compensatedTopic,
+            @Value("${choreography.kafka.compensation-failed-topic}") String failedTopic) {
+        return new KafkaCompensationPublisher(requests, messages, compensatedTopic, failedTopic);
     }
 
     @Bean
