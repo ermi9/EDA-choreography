@@ -6,6 +6,7 @@ import com.eda.choreography.domain.compensation.CompensationTrigger;
 import com.eda.choreography.domain.join.JoinTimeoutNotices;
 import com.eda.choreography.domain.message.ChoreographyMessage;
 import com.eda.choreography.domain.step.MessagePublisher;
+import java.time.Duration;
 import java.util.Map;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.producer.ProducerConfig;
@@ -103,8 +104,9 @@ public class KafkaConfig {
     @Bean
     StepContainerFactory stepContainerFactory(
             ConsumerFactory<String, ChoreographyMessage> messages,
-            ConsumerFactory<String, CompensationRequest> requests) {
-        return new StepContainerFactory(messages, requests);
+            ConsumerFactory<String, CompensationRequest> requests,
+            @Value("${choreography.compensation.retry-for}") Duration compensationRetryFor) {
+        return new StepContainerFactory(messages, requests, compensationRetryFor);
     }
 
     /**

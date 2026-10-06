@@ -5,6 +5,7 @@ import com.eda.choreography.domain.compensation.CompensationRunner;
 import com.eda.choreography.domain.message.ChoreographyMessage;
 import com.eda.choreography.domain.step.JoinRunner;
 import com.eda.choreography.domain.step.StepRunner;
+import java.time.Duration;
 import java.util.Objects;
 import java.util.function.Consumer;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
@@ -15,6 +16,7 @@ import org.springframework.kafka.listener.ConcurrentMessageListenerContainer;
 import org.springframework.kafka.listener.ContainerProperties;
 import org.springframework.kafka.listener.DefaultErrorHandler;
 import org.springframework.kafka.listener.MessageListener;
+import org.springframework.util.backoff.ExponentialBackOff;
 import org.springframework.util.backoff.FixedBackOff;
 
 /**
@@ -29,26 +31,33 @@ import org.springframework.util.backoff.FixedBackOff;
  *
  * <p>A step that throws is retried twice, a second apart, and then fails: the runner records
  * the failure and the instance is undone or the failure goes to the join. If even that cannot
- * be published, the record is delivered again. A compensation that throws is retried until it
- * succeeds, because dropping it would leave the instance half undone. A record that cannot be
- * read is logged and skipped at once (see {@link MessageWireFormat}).
+ * be published, the record is delivered again.
+ *
+ * <p>A compensation that throws is retried for longer, with a growing pause (1 s doubling up to
+ * 30 s), because most undo failures are passing outages. Once the configured time is spent the
+ * request is parked for an operator (see {@link CompensationRunner#giveUp}) instead of blocking
+ * the partition for every other instance. A record that cannot be read is logged and skipped at
+ * once (see {@link MessageWireFormat}).
  */
 public class StepContainerFactory {
 
     private static final Logger LOG = LoggerFactory.getLogger(StepContainerFactory.class);
 
     private static final FixedBackOff RETRY_TWICE_A_SECOND_APART = new FixedBackOff(1_000L, 2L);
-    private static final FixedBackOff RETRY_EVERY_SECOND_UNTIL_IT_WORKS =
-            new FixedBackOff(1_000L, FixedBackOff.UNLIMITED_ATTEMPTS);
-
     private final ConsumerFactory<String, ChoreographyMessage> messages;
     private final ConsumerFactory<String, CompensationRequest> requests;
+    private final Duration compensationRetryFor;
 
+    /**
+     * @param compensationRetryFor how long a failing compensation is retried before it is parked
+     */
     public StepContainerFactory(
             ConsumerFactory<String, ChoreographyMessage> messages,
-            ConsumerFactory<String, CompensationRequest> requests) {
+            ConsumerFactory<String, CompensationRequest> requests,
+            Duration compensationRetryFor) {
         this.messages = Objects.requireNonNull(messages, "messages");
         this.requests = Objects.requireNonNull(requests, "requests");
+        this.compensationRetryFor = Objects.requireNonNull(compensationRetryFor, "compensationRetryFor");
     }
 
     public ConcurrentMessageListenerContainer<String, ChoreographyMessage> create(StepRunner runner) {
@@ -86,8 +95,27 @@ public class StepContainerFactory {
 
         var container = new ConcurrentMessageListenerContainer<>(requests, properties);
         container.setBeanName("compensate-" + runner.stepId());
-        container.setCommonErrorHandler(new DefaultErrorHandler(RETRY_EVERY_SECOND_UNTIL_IT_WORKS));
+        container.setCommonErrorHandler(new DefaultErrorHandler(
+                (record, exception) -> {
+                    var request = (CompensationRequest) record.value();
+                    if (request == null) {
+                        LOG.error("compensator {} skips an unreadable record of {} at {}-{}@{}", runner.stepId(),
+                                record.key(), record.topic(), record.partition(), record.offset(), exception);
+                        return;
+                    }
+                    LOG.error("compensator {} parks entry {} of {} after retrying for {}", runner.stepId(),
+                            request.entryId(), record.key(), compensationRetryFor, exception);
+                    runner.giveUp(request);
+                },
+                growingPauseFor(compensationRetryFor)));
         return container;
+    }
+
+    private static ExponentialBackOff growingPauseFor(Duration total) {
+        var backOff = new ExponentialBackOff(1_000L, 2.0);
+        backOff.setMaxInterval(30_000L);
+        backOff.setMaxElapsedTime(total.toMillis());
+        return backOff;
     }
 
     private ConcurrentMessageListenerContainer<String, ChoreographyMessage> messageContainer(

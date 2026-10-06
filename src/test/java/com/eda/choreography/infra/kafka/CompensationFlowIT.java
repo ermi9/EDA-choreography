@@ -2,12 +2,14 @@ package com.eda.choreography.infra.kafka;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.eda.choreography.domain.compensation.CompensationRequest;
 import com.eda.choreography.domain.message.ChoreographyMessage;
 import com.eda.choreography.domain.trace.TraceEntry;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
+import org.apache.kafka.clients.consumer.Consumer;
 import org.junit.jupiter.api.Test;
 
 /** A step that keeps failing gets the instance undone, over the real broker, with no coordinator. */
@@ -72,5 +74,48 @@ class CompensationFlowIT extends AbstractFlowIT {
             assertThat(compensated.hasFailed()).isTrue();
             assertThat(more(outcomes, completedTopic, List.of(correlationId), Duration.ofSeconds(1))).isEmpty();
         }
+    }
+
+    @Test
+    void anUndoThatKeepsFailingIsParkedAndTheStepsBeforeItWait() throws Exception {
+        var reserve = unique("reserve");
+        var price = unique("price");
+        var tax = unique("tax");
+        createTopicsFor(reserve, price, tax);
+        var routes = new Routes().then(reserve, price).then(price, tax);
+        var undoAttempts = new AtomicInteger();
+        startStep(reserve, message -> Map.of("quantity", 10), routes);
+        startStep(price, message -> Map.of("amount", 30), routes, (entry, instance) -> {
+            undoAttempts.incrementAndGet();
+            throw new IllegalStateException("refund provider rejects the refund");
+        });
+        startStep(tax, message -> {
+            throw new IllegalStateException("tax service down");
+        }, routes);
+        var correlationId = newInstance();
+
+        try (var outcomes = outcomes(); var parked = parked()) {
+            publisher.publish(reserve, ChoreographyMessage.start(correlationId, "checkout", Map.of()));
+
+            var request = awaitParked(parked, correlationId);
+
+            assertThat(request.entry().stepId()).isEqualTo(price);
+            assertThat(undoAttempts.get()).isGreaterThan(1);
+            assertThat(undone).isEmpty();
+            assertThat(more(outcomes, compensatedTopic, List.of(correlationId), Duration.ofSeconds(1))).isEmpty();
+        }
+    }
+
+    private static CompensationRequest awaitParked(
+            Consumer<String, CompensationRequest> parked, String correlationId) {
+        var deadline = System.nanoTime() + WAIT.toNanos();
+        while (System.nanoTime() < deadline) {
+            for (var record : parked.poll(Duration.ofMillis(250))) {
+                if (correlationId.equals(record.key())) {
+                    return record.value();
+                }
+            }
+        }
+        throw new AssertionError(correlationId + " was not parked within " + WAIT);
     }
 }

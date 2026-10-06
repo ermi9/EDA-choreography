@@ -1,6 +1,8 @@
 package com.eda.choreography.infra.kafka;
 
+import com.eda.choreography.domain.compensation.CompensationAction;
 import com.eda.choreography.domain.compensation.CompensationPublisher;
+import com.eda.choreography.domain.compensation.CompensationRequest;
 import com.eda.choreography.domain.compensation.CompensationRunner;
 import com.eda.choreography.domain.compensation.CompensationTrigger;
 import com.eda.choreography.domain.join.JoinDeadlines;
@@ -58,11 +60,17 @@ abstract class AbstractFlowIT extends AbstractInfraIT {
     @Autowired
     ConsumerFactory<String, ChoreographyMessage> consumerFactory;
 
+    @Autowired
+    ConsumerFactory<String, CompensationRequest> requestConsumerFactory;
+
     @Value("${choreography.kafka.completed-topic}")
     String completedTopic;
 
     @Value("${choreography.kafka.compensated-topic}")
     String compensatedTopic;
+
+    @Value("${choreography.kafka.compensation-failed-topic}")
+    String compensationFailedTopic;
 
     /** The steps undone so far, in the order the compensators undid them. */
     final Queue<String> undone = new ConcurrentLinkedQueue<>();
@@ -84,7 +92,7 @@ abstract class AbstractFlowIT extends AbstractInfraIT {
 
     /** Creates the input and compensation topics of the given steps, and the shared outcome topics. */
     void createTopicsFor(String... steps) throws Exception {
-        var topics = new ArrayList<String>(List.of(completedTopic, compensatedTopic));
+        var topics = new ArrayList<String>(List.of(completedTopic, compensatedTopic, compensationFailedTopic));
         for (var step : steps) {
             topics.add(StepTopics.inputTopic(step));
             topics.add(StepTopics.compensationTopic(step));
@@ -94,8 +102,13 @@ abstract class AbstractFlowIT extends AbstractInfraIT {
 
     /** Starts a step together with the compensator that undoes it. */
     void startStep(String stepId, StepAction action, NextSteps routes) {
+        startStep(stepId, action, routes, (entry, instance) -> undone.add(entry.stepId()));
+    }
+
+    /** Starts a step together with a compensator that undoes it the given way. */
+    void startStep(String stepId, StepAction action, NextSteps routes, CompensationAction undo) {
         start(containers.create(new StepRunner(stepId, action, routes, publisher, compensations)));
-        startCompensator(stepId);
+        startCompensator(stepId, undo);
     }
 
     /** Starts a join and its compensator, with a fresh state machine over the shared Redis store. */
@@ -114,9 +127,12 @@ abstract class AbstractFlowIT extends AbstractInfraIT {
     }
 
     void startCompensator(String stepId) {
-        start(containers.create(new CompensationRunner(
-                stepId, (entry, instance) -> undone.add(entry.stepId()), new JoinStateMachine(joinStore),
-                compensationPublisher)));
+        startCompensator(stepId, (entry, instance) -> undone.add(entry.stepId()));
+    }
+
+    void startCompensator(String stepId, CompensationAction undo) {
+        start(containers.create(
+                new CompensationRunner(stepId, undo, new JoinStateMachine(joinStore), compensationPublisher)));
     }
 
     void start(MessageListenerContainer container) {
@@ -129,6 +145,13 @@ abstract class AbstractFlowIT extends AbstractInfraIT {
     Consumer<String, ChoreographyMessage> outcomes() {
         var consumer = consumerFactory.createConsumer("observer-" + UUID.randomUUID(), null);
         consumer.subscribe(List.of(completedTopic, compensatedTopic));
+        return consumer;
+    }
+
+    /** A consumer of the parked compensation requests. */
+    Consumer<String, CompensationRequest> parked() {
+        var consumer = requestConsumerFactory.createConsumer("observer-" + UUID.randomUUID(), null);
+        consumer.subscribe(List.of(compensationFailedTopic));
         return consumer;
     }
 

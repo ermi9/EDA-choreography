@@ -39,6 +39,8 @@ public abstract class AbstractInfraIT {
         registry.add("spring.kafka.bootstrap-servers", KAFKA::getBootstrapServers);
         registry.add("spring.data.redis.host", REDIS::getHost);
         registry.add("spring.data.redis.port", () -> REDIS.getMappedPort(6379));
+        // Short, so a test of an undo that keeps failing does not wait five minutes.
+        registry.add("choreography.compensation.retry-for", () -> "2s");
     }
 
     /**
