@@ -2,6 +2,7 @@ package com.eda.choreography.domain.step;
 
 import com.eda.choreography.domain.compensation.CompensationTrigger;
 import com.eda.choreography.domain.join.BranchArrival;
+import com.eda.choreography.domain.join.JoinDeadlines;
 import com.eda.choreography.domain.join.JoinKey;
 import com.eda.choreography.domain.join.JoinOutcome.Decision;
 import com.eda.choreography.domain.join.JoinState;
@@ -9,6 +10,8 @@ import com.eda.choreography.domain.join.JoinStateMachine;
 import com.eda.choreography.domain.message.ChoreographyMessage;
 import com.eda.choreography.domain.trace.TraceEntry;
 import com.eda.choreography.domain.trace.TraceGraph;
+import java.time.Clock;
+import java.time.Duration;
 import java.util.Map;
 import java.util.Objects;
 
@@ -20,25 +23,44 @@ import java.util.Objects;
  * <p>When the join fires it either runs its step or, if any branch failed, undoes the instance.
  * The merged trace holds every branch, so the compensation reaches the successful branches too.
  *
- * <p>A join that waits too long is timed out from outside (see {@link #timeOut}). The branches
+ * <p>A join that waits too long is timed out. The first branch to arrive sets the join's
+ * deadline; when it passes, a sweeper has {@link #timeOut} called for the instance. The branches
  * that did arrive are undone then, and a branch that arrives later undoes itself.
  */
 public final class JoinRunner {
 
     private final StepRunner step;
     private final int expectedBranches;
+    private final Duration timeout;
     private final JoinStateMachine joins;
+    private final JoinDeadlines deadlines;
     private final CompensationTrigger compensations;
+    private final Clock clock;
 
+    /**
+     * @param timeout how long the join waits for its last branch, counted from its first
+     */
     public JoinRunner(
-            StepRunner step, int expectedBranches, JoinStateMachine joins, CompensationTrigger compensations) {
+            StepRunner step,
+            int expectedBranches,
+            Duration timeout,
+            JoinStateMachine joins,
+            JoinDeadlines deadlines,
+            CompensationTrigger compensations,
+            Clock clock) {
         if (expectedBranches < 1) {
             throw new IllegalArgumentException("expectedBranches must be at least 1, was " + expectedBranches);
         }
+        if (timeout.isNegative() || timeout.isZero()) {
+            throw new IllegalArgumentException("timeout must be positive, was " + timeout);
+        }
         this.step = Objects.requireNonNull(step, "step");
         this.expectedBranches = expectedBranches;
+        this.timeout = timeout;
         this.joins = Objects.requireNonNull(joins, "joins");
+        this.deadlines = Objects.requireNonNull(deadlines, "deadlines");
         this.compensations = Objects.requireNonNull(compensations, "compensations");
+        this.clock = Objects.requireNonNull(clock, "clock");
     }
 
     public String stepId() {
@@ -49,6 +71,9 @@ public final class JoinRunner {
      * Takes one branch's message. A branch that arrives again after the join fired runs the
      * step again, because the first run may have stopped before handing on; the step's entry
      * id is derived from the merged trace, so both runs record the same entry.
+     *
+     * <p>While the join is open, every arrival (a redelivered one too) makes sure it has a
+     * deadline, in case an earlier run stopped between opening the join and setting it.
      */
     public void handle(ChoreographyMessage branch) {
         var branchId = lastEntryOf(branch).id();
@@ -58,9 +83,14 @@ public final class JoinRunner {
             compensations.trigger(branch, "join-late:" + branchId);
             return;
         }
+        if (outcome.state().status() == JoinState.Status.OPEN) {
+            deadlines.setIfAbsent(key, clock.instant().plus(timeout));
+            return;
+        }
         if (!outcome.state().fired()) {
             return;
         }
+        deadlines.remove(key);
         var merged = merge(outcome.state());
         if (merged.hasFailed()) {
             compensations.trigger(merged, "join-failed:" + stepId());

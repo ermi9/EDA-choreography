@@ -4,9 +4,15 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.eda.choreography.domain.compensation.CompensationTrigger;
+import com.eda.choreography.domain.join.InMemoryJoinDeadlines;
 import com.eda.choreography.domain.join.InMemoryJoinStateStore;
+import com.eda.choreography.domain.join.JoinKey;
 import com.eda.choreography.domain.join.JoinStateMachine;
 import com.eda.choreography.domain.message.ChoreographyMessage;
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
@@ -19,14 +25,15 @@ class JoinRunnerTest {
     private static final ChoreographyMessage FROM_B = FORKED.recordStep("B", Map.of("amount", 30));
     private static final ChoreographyMessage FROM_C = FORKED.recordStep("C", Map.of("slot", "monday"));
     private static final Map<String, Object> JOINED = Map.of("ready", true);
+    private static final Instant NOW = Instant.parse("2026-10-06T12:00:00Z");
+    private static final Duration TIMEOUT = Duration.ofMinutes(5);
+    private static final JoinKey KEY = new JoinKey("order-42", "J");
 
     private final RecordingPublisher publisher = new RecordingPublisher();
     private final RecordingCompensations compensations = new RecordingCompensations();
     private final CompensationTrigger trigger = new CompensationTrigger(compensations);
-    private final JoinStateMachine joins = new JoinStateMachine(new InMemoryJoinStateStore());
-    private final JoinRunner join = new JoinRunner(
-            new StepRunner("J", message -> JOINED, (stepId, message) -> List.of("D"), publisher, trigger),
-            2, joins, trigger);
+    private final InMemoryJoinDeadlines deadlines = new InMemoryJoinDeadlines();
+    private final JoinRunner join = joinPublishingTo(publisher, deadlines);
 
     @Test
     void runsTheStepOnceEveryBranchHasArrived() {
@@ -71,6 +78,32 @@ class JoinRunnerTest {
 
         assertThat(publisher.sent).hasSize(2);
         assertThat(publisher.sent.get(1)).isEqualTo(publisher.sent.get(0));
+    }
+
+    @Test
+    void theFirstBranchStartsTheWaitAndALaterOneDoesNotExtendIt() {
+        join.handle(FROM_B);
+
+        assertThat(deadlines.dueBy(NOW.plus(TIMEOUT).minusMillis(1), 10)).isEmpty();
+        assertThat(deadlines.dueBy(NOW.plus(TIMEOUT), 10)).containsExactly(KEY);
+    }
+
+    @Test
+    void aJoinThatFiredHasNoDeadline() {
+        join.handle(FROM_B);
+        join.handle(FROM_C);
+
+        assertThat(deadlines.dueBy(NOW.plus(TIMEOUT), 10)).isEmpty();
+    }
+
+    @Test
+    void aRedeliveredBranchSetsADeadlineTheFirstDeliveryDidNotGetTo() {
+        join.handle(FROM_B);
+        deadlines.remove(KEY);
+
+        join.handle(FROM_B);
+
+        assertThat(deadlines.dueBy(NOW.plus(TIMEOUT), 10)).containsExactly(KEY);
     }
 
     @Test
@@ -148,11 +181,16 @@ class JoinRunnerTest {
     /** What a fresh join hands on after the two branches arrive in the given order. */
     private ChoreographyMessage joined(ChoreographyMessage first, ChoreographyMessage second) {
         var sent = new RecordingPublisher();
-        var fresh = new JoinRunner(
-                new StepRunner("J", message -> JOINED, (stepId, message) -> List.of("D"), sent, trigger),
-                2, new JoinStateMachine(new InMemoryJoinStateStore()), trigger);
+        var fresh = joinPublishingTo(sent, new InMemoryJoinDeadlines());
         fresh.handle(first);
         fresh.handle(second);
         return sent.sent.get(0).message();
+    }
+
+    private JoinRunner joinPublishingTo(RecordingPublisher sent, InMemoryJoinDeadlines deadlinesOfJoin) {
+        return new JoinRunner(
+                new StepRunner("J", message -> JOINED, (stepId, message) -> List.of("D"), sent, trigger),
+                2, TIMEOUT, new JoinStateMachine(new InMemoryJoinStateStore()), deadlinesOfJoin, trigger,
+                Clock.fixed(NOW, ZoneOffset.UTC));
     }
 }
