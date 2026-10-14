@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:choreo="http://eda.com/choreography"
+                  id="notify-definitions" targetNamespace="http://eda.com/flows">
+  <bpmn:process id="sale" isExecutable="true">
+    <bpmn:startEvent id="start">
+      <bpmn:outgoing>f1</bpmn:outgoing>
+    </bpmn:startEvent>
+    <bpmn:serviceTask id="Task_buyer" name="Notify buyer" choreo:service="notify">
+      <bpmn:incoming>f1</bpmn:incoming>
+      <bpmn:outgoing>f2</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:serviceTask id="Task_charge" name="charge">
+      <bpmn:incoming>f2</bpmn:incoming>
+      <bpmn:outgoing>f3</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:boundaryEvent id="undo-charge" attachedToRef="Task_charge">
+      <bpmn:compensateEventDefinition id="undo-charge-definition" />
+    </bpmn:boundaryEvent>
+    <bpmn:serviceTask id="Task_refund" name="refund" isForCompensation="true" />
+    <bpmn:serviceTask id="Task_seller" name="Notify seller" choreo:service="notify">
+      <bpmn:incoming>f3</bpmn:incoming>
+      <bpmn:outgoing>f4</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:endEvent id="end">
+      <bpmn:incoming>f4</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:sequenceFlow id="f1" sourceRef="start" targetRef="Task_buyer" />
+    <bpmn:sequenceFlow id="f2" sourceRef="Task_buyer" targetRef="Task_charge" />
+    <bpmn:sequenceFlow id="f3" sourceRef="Task_charge" targetRef="Task_seller" />
+    <bpmn:sequenceFlow id="f4" sourceRef="Task_seller" targetRef="end" />
+    <bpmn:association id="undo-link" associationDirection="One" sourceRef="undo-charge" targetRef="Task_refund" />
+  </bpmn:process>
+</bpmn:definitions>

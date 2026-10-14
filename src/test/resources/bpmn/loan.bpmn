@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                  id="loan-definitions" targetNamespace="http://eda.com/flows">
+  <bpmn:process id="loan" isExecutable="true">
+    <bpmn:startEvent id="start">
+      <bpmn:outgoing>to-assess</bpmn:outgoing>
+    </bpmn:startEvent>
+    <bpmn:serviceTask id="Task_assess" name="assess">
+      <bpmn:incoming>to-assess</bpmn:incoming>
+      <bpmn:outgoing>to-choice</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:exclusiveGateway id="risk" default="low">
+      <bpmn:incoming>to-choice</bpmn:incoming>
+      <bpmn:outgoing>high</bpmn:outgoing>
+      <bpmn:outgoing>low</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:serviceTask id="Task_review" name="review">
+      <bpmn:incoming>high</bpmn:incoming>
+      <bpmn:outgoing>reviewed</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:serviceTask id="Task_approve" name="approve">
+      <bpmn:incoming>low</bpmn:incoming>
+      <bpmn:incoming>reviewed</bpmn:incoming>
+      <bpmn:outgoing>to-end</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:endEvent id="end">
+      <bpmn:incoming>to-end</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:sequenceFlow id="to-assess" sourceRef="start" targetRef="Task_assess" />
+    <bpmn:sequenceFlow id="to-choice" sourceRef="Task_assess" targetRef="risk" />
+    <bpmn:sequenceFlow id="high" sourceRef="risk" targetRef="Task_review">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">#result['risk'] == 'HIGH'</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="low" sourceRef="risk" targetRef="Task_approve" />
+    <bpmn:sequenceFlow id="reviewed" sourceRef="Task_review" targetRef="Task_approve" />
+    <bpmn:sequenceFlow id="to-end" sourceRef="Task_approve" targetRef="end" />
+  </bpmn:process>
+</bpmn:definitions>

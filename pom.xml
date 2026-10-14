@@ -20,6 +20,7 @@
 		<java.version>17</java.version>
 		<testcontainers.version>1.21.4</testcontainers.version>
 		<archunit.version>1.3.0</archunit.version>
+		<camunda-bpmn-model.version>7.23.0</camunda-bpmn-model.version>
 	</properties>
 
 	<dependencyManagement>
@@ -51,6 +52,13 @@
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-data-redis</artifactId>
+		</dependency>
+
+		<!-- Reads drawn .bpmn files into plans: the standalone model library, not the Camunda engine. -->
+		<dependency>
+			<groupId>org.camunda.bpm.model</groupId>
+			<artifactId>camunda-bpmn-model</artifactId>
+			<version>${camunda-bpmn-model.version}</version>
 		</dependency>
 
 		<!-- Test only -->
