@@ -1,6 +1,7 @@
 package com.eda.choreography.infra;
 
 import java.util.Arrays;
+import java.util.List;
 import java.util.Map;
 import org.apache.kafka.clients.admin.Admin;
 import org.apache.kafka.clients.admin.AdminClientConfig;
@@ -18,6 +19,10 @@ import org.testcontainers.utility.DockerImageName;
  *
  * <p>The images are the ones the discovery platform runs: {@code apache/kafka:3.7.0} rather
  * than Testcontainers' default Confluent image, and {@code redis:7-alpine}.
+ *
+ * <p>Discovery itself is not run. Its {@code service-events} topic is created the way discovery
+ * declares it (compacted, three partitions, before anything reads it), and {@link FakeDiscovery}
+ * writes the events.
  */
 @SpringBootTest
 public abstract class AbstractInfraIT {
@@ -29,9 +34,14 @@ public abstract class AbstractInfraIT {
     private static final GenericContainer<?> REDIS =
             new GenericContainer<>(DockerImageName.parse("redis:7-alpine")).withExposedPorts(6379);
 
+    /** Writes discovery's events; see {@link FakeDiscovery} for what it is and is not. */
+    protected static final FakeDiscovery DISCOVERY;
+
     static {
         KAFKA.start();
         REDIS.start();
+        createServiceEventsTopic();
+        DISCOVERY = new FakeDiscovery(KAFKA.getBootstrapServers());
     }
 
     @DynamicPropertySource
@@ -57,6 +67,15 @@ public abstract class AbstractInfraIT {
                     .map(topic -> new NewTopic(topic, PARTITIONS, (short) 1))
                     .toList();
             admin.createTopics(newTopics).all().get();
+        }
+    }
+
+    private static void createServiceEventsTopic() {
+        try (var admin = Admin.create(Map.of(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, KAFKA.getBootstrapServers()))) {
+            admin.createTopics(List.of(new NewTopic(FakeDiscovery.TOPIC, PARTITIONS, (short) 1)
+                    .configs(Map.of("cleanup.policy", "compact")))).all().get();
+        } catch (Exception e) {
+            throw new IllegalStateException("could not create " + FakeDiscovery.TOPIC, e);
         }
     }
 }

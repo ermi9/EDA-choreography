@@ -14,9 +14,10 @@ import org.springframework.boot.test.context.SpringBootTest;
 
 /**
  * The application context wires up without a broker or Redis reachable. The join sweeper is
- * off, since it would reach for Redis every second.
+ * off, since it would reach for Redis every second, and so is the listener on discovery's
+ * stream, which would reach for the broker.
  */
-@SpringBootTest(properties = "choreography.join.sweep-enabled=false")
+@SpringBootTest(properties = {"choreography.join.sweep-enabled=false", "choreography.discovery.listen-enabled=false"})
 class ChoreographyEngineApplicationTests {
 
     @Autowired
