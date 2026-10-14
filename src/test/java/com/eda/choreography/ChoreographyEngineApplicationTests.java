@@ -17,7 +17,8 @@ import org.springframework.boot.test.context.SpringBootTest;
  * off, since it would reach for Redis every second, and so is the listener on discovery's
  * stream, which would reach for the broker.
  */
-@SpringBootTest(properties = {"choreography.join.sweep-enabled=false", "choreography.discovery.listen-enabled=false"})
+@SpringBootTest(properties = {"choreography.join.sweep-enabled=false", "choreography.discovery.listen-enabled=false",
+        "choreography.flows.load-folder=false"})
 class ChoreographyEngineApplicationTests {
 
     @Autowired
