@@ -36,6 +36,7 @@
   .FAILED { color: var(--bad); font-weight: 600; }
   .UNDONE { color: var(--undo); font-weight: 600; }
   :root { --undo: #b54708; }
+  #scenario-note { margin-top: 6px; }
   ol.stages { margin: 6px 0 0; padding-left: 20px; font-size: 13px; }
   ol.stages li { margin: 2px 0; }
   .djs-element.run-done .djs-visual > :first-child { stroke: var(--ok) !important; fill: #e7f6ef !important; }
@@ -52,6 +53,10 @@
 <aside>
   <h1>Choreography flow editor</h1>
   <p class="hint">Draw tasks, exclusive gateways (choices) and parallel gateways (fork and join). Pick each task's service from the catalog. Then save the flow and run it.</p>
+
+  <h2>Demo scenarios</h2>
+  <div class="row"><select id="scenario"></select><button class="secondary" id="load-scenario">Load</button></div>
+  <p class="hint" id="scenario-note"></p>
 
   <h2>Flow</h2>
   <label for="flow-name">Name</label>
@@ -205,6 +210,36 @@ $('load').onclick = async () => {
   } catch (e) { say('Load: ' + e.message, 'error'); }
 };
 
+// Flows in deploy/flows, each with a request that shows one behaviour of the runtime.
+const scenarios = [
+  { flow: 'order', title: 'order: large order is reviewed', input: { amount: 5000 }, note: 'The choice after assess takes the review path; pay and ship run in parallel and join at confirm.' },
+  { flow: 'order', title: 'order: small order skips review', input: { amount: 20 }, note: 'The condition #result[\'amount\'] > 1000 is false, so the default path goes straight to reserve.' },
+  { flow: 'order', title: 'order: ship fails, undo', input: { amount: 20, failAt: 'ship' }, note: 'ship fails inside the fork. The join hears of it, then pay, reserve and assess are undone in reverse order.' },
+  { flow: 'wide-fork', title: 'wide-fork: four branches', input: { amount: 5000 }, note: 'One fork into four branches. The join fires once it holds the set {pay, ship, notify, charge}.' },
+  { flow: 'wide-fork', title: 'wide-fork: ship fails, undo', input: { amount: 5000, failAt: 'ship' }, note: 'The three siblings that succeeded are undone together in stage 1, then reserve, then assess.' },
+  { flow: 'two-forks', title: 'two-forks: all succeed', input: { amount: 50 }, note: 'Two forks one after the other; the first has a two-step branch.' },
+  { flow: 'two-forks', title: 'two-forks: notify fails, undo', input: { amount: 50, failAt: 'notify' }, note: 'Five stages, read off the trace: review, reserve, then charge and ship together, then pay, then assess.' },
+  { flow: 'choice-in-branch', title: 'choice-in-branch: reviewed', input: { amount: 5000 }, note: 'A choice inside a branch. The branch still arrives at the join once.' },
+  { flow: 'choice-in-branch', title: 'choice-in-branch: charge fails, undo', input: { amount: 20, failAt: 'charge' }, note: 'review was never run, so it is not in the trace and nothing undoes it.' },
+  { flow: 'join-timeout', title: 'join-timeout: in time', input: { amount: 10 }, note: 'Both branches reach the join well within its 3 s timeout.' },
+  { flow: 'join-timeout', title: 'join-timeout: long branch is late', input: { amount: 10, delayMs: 2000 }, note: 'Each step takes 2 s. The join gives up 3 s after pay arrives and undoes what arrived; the late branch then undoes its own steps.' },
+  { flow: 'sale', title: 'sale: seller notice fails, undo', input: { failAt: 'Task_seller' }, note: 'A linear flow where one service, notify, runs two steps. The second fails; charge and the first notify are undone.' }
+];
+
+scenarios.forEach((scenario, i) => $('scenario').append(new Option(scenario.title, i)));
+$('scenario').onchange = () => { $('scenario-note').textContent = scenarios[$('scenario').value].note; };
+
+async function loadScenario(scenario) {
+  await loadFlow(scenario.flow);
+  $('input').value = JSON.stringify(scenario.input);
+  $('scenario-note').textContent = scenario.note;
+  say('Loaded ' + scenario.flow + '. Press "Run saved flow".', 'success');
+}
+
+$('load-scenario').onclick = async () => {
+  try { await loadScenario(scenarios[$('scenario').value]); } catch (e) { say('Scenario: ' + e.message, 'error'); }
+};
+
 $('save').onclick = async () => {
   const name = $('flow-name').value.trim();
   const timeout = $('join-timeout').value.trim();
@@ -327,9 +362,10 @@ function showRun(run, compensations) {
   $('run-result').innerHTML = html;
 }
 
-newDiagram();
 loadCatalog();
 loadStoredNames();
+$('scenario-note').textContent = scenarios[0].note;
+newDiagram().then(() => loadScenario(scenarios[0])).catch(() => say('Draw a flow, or load a stored one.'));
 setInterval(loadCatalog, 10000);
 </script>
 </body>
