@@ -38,7 +38,7 @@ services:
     restart: unless-stopped
 
   discovery:
-    image: ${DISCOVERY_IMAGE:-ghcr.io/ermi9/eda-discovery-service:latest}
+    image: ${DISCOVERY_IMAGE:-ghcr.io/ermi9/discovery-service:latest}
     restart: unless-stopped
     depends_on: [kafka, redis]
     environment:
