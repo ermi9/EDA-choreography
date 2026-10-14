@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                  xmlns:choreo="http://eda.com/choreography"
+                  id="order-definitions" targetNamespace="http://eda.com/flows">
+  <bpmn:process id="order" isExecutable="true" choreo:joinTimeout="PT1M">
+    <bpmn:startEvent id="start">
+      <bpmn:outgoing>f1</bpmn:outgoing>
+    </bpmn:startEvent>
+    <bpmn:serviceTask id="Task_assess" name="assess">
+      <bpmn:incoming>f1</bpmn:incoming>
+      <bpmn:outgoing>f2</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:exclusiveGateway id="risk" default="low">
+      <bpmn:incoming>f2</bpmn:incoming>
+      <bpmn:outgoing>high</bpmn:outgoing>
+      <bpmn:outgoing>low</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:serviceTask id="Task_review" name="review">
+      <bpmn:incoming>high</bpmn:incoming>
+      <bpmn:outgoing>f3</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:serviceTask id="Task_reserve" name="reserve">
+      <bpmn:incoming>low</bpmn:incoming>
+      <bpmn:incoming>f3</bpmn:incoming>
+      <bpmn:outgoing>f4</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:parallelGateway id="fork">
+      <bpmn:incoming>f4</bpmn:incoming>
+      <bpmn:outgoing>f5</bpmn:outgoing>
+      <bpmn:outgoing>f6</bpmn:outgoing>
+    </bpmn:parallelGateway>
+    <bpmn:serviceTask id="Task_pay" name="pay">
+      <bpmn:incoming>f5</bpmn:incoming>
+      <bpmn:outgoing>f7</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:serviceTask id="Task_ship" name="ship">
+      <bpmn:incoming>f6</bpmn:incoming>
+      <bpmn:outgoing>f8</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:parallelGateway id="join">
+      <bpmn:incoming>f7</bpmn:incoming>
+      <bpmn:incoming>f8</bpmn:incoming>
+      <bpmn:outgoing>f9</bpmn:outgoing>
+    </bpmn:parallelGateway>
+    <bpmn:serviceTask id="Task_confirm" name="confirm">
+      <bpmn:incoming>f9</bpmn:incoming>
+      <bpmn:outgoing>f10</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:endEvent id="end">
+      <bpmn:incoming>f10</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:sequenceFlow id="f1" sourceRef="start" targetRef="Task_assess" />
+    <bpmn:sequenceFlow id="f2" sourceRef="Task_assess" targetRef="risk" />
+    <bpmn:sequenceFlow id="high" sourceRef="risk" targetRef="Task_review">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">#result['risk'] == 'HIGH'</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="low" sourceRef="risk" targetRef="Task_reserve" />
+    <bpmn:sequenceFlow id="f3" sourceRef="Task_review" targetRef="Task_reserve" />
+    <bpmn:sequenceFlow id="f4" sourceRef="Task_reserve" targetRef="fork" />
+    <bpmn:sequenceFlow id="f5" sourceRef="fork" targetRef="Task_pay" />
+    <bpmn:sequenceFlow id="f6" sourceRef="fork" targetRef="Task_ship" />
+    <bpmn:sequenceFlow id="f7" sourceRef="Task_pay" targetRef="join" />
+    <bpmn:sequenceFlow id="f8" sourceRef="Task_ship" targetRef="join" />
+    <bpmn:sequenceFlow id="f9" sourceRef="join" targetRef="Task_confirm" />
+    <bpmn:sequenceFlow id="f10" sourceRef="Task_confirm" targetRef="end" />
+  </bpmn:process>
+</bpmn:definitions>
