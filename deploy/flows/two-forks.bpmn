@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
+                  xmlns:dc="http://www.omg.org/spec/DD/20100524/DC"
+                  xmlns:di="http://www.omg.org/spec/DD/20100524/DI"
+                  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                  xmlns:choreo="http://eda.com/choreography"
+                  id="two-forks-definitions" targetNamespace="http://eda.com/flows">
+  <bpmn:process id="two-forks" isExecutable="true" choreo:joinTimeout="PT30S">
+    <bpmn:documentation>Two forks in sequence. The first fork's upper branch has two steps, so compensation undoes ship alongside charge, not after pay.</bpmn:documentation>
+    <bpmn:startEvent id="start"><bpmn:outgoing>f1</bpmn:outgoing></bpmn:startEvent>
+    <bpmn:serviceTask id="Task_assess" name="assess" choreo:service="assess"><bpmn:incoming>f1</bpmn:incoming><bpmn:outgoing>f2</bpmn:outgoing></bpmn:serviceTask>
+    <bpmn:parallelGateway id="fork1"><bpmn:incoming>f2</bpmn:incoming><bpmn:outgoing>f3</bpmn:outgoing><bpmn:outgoing>f6</bpmn:outgoing></bpmn:parallelGateway>
+    <bpmn:serviceTask id="Task_pay" name="pay" choreo:service="pay"><bpmn:incoming>f3</bpmn:incoming><bpmn:outgoing>f4</bpmn:outgoing></bpmn:serviceTask>
+    <bpmn:serviceTask id="Task_charge" name="charge" choreo:service="charge"><bpmn:incoming>f4</bpmn:incoming><bpmn:outgoing>f5</bpmn:outgoing></bpmn:serviceTask>
+    <bpmn:serviceTask id="Task_ship" name="ship" choreo:service="ship"><bpmn:incoming>f6</bpmn:incoming><bpmn:outgoing>f7</bpmn:outgoing></bpmn:serviceTask>
+    <bpmn:parallelGateway id="join1"><bpmn:incoming>f5</bpmn:incoming><bpmn:incoming>f7</bpmn:incoming><bpmn:outgoing>f8</bpmn:outgoing></bpmn:parallelGateway>
+    <bpmn:serviceTask id="Task_reserve" name="reserve" choreo:service="reserve"><bpmn:incoming>f8</bpmn:incoming><bpmn:outgoing>f9</bpmn:outgoing></bpmn:serviceTask>
+    <bpmn:parallelGateway id="fork2"><bpmn:incoming>f9</bpmn:incoming><bpmn:outgoing>f10</bpmn:outgoing><bpmn:outgoing>f12</bpmn:outgoing></bpmn:parallelGateway>
+    <bpmn:serviceTask id="Task_notify" name="notify" choreo:service="notify"><bpmn:incoming>f10</bpmn:incoming><bpmn:outgoing>f11</bpmn:outgoing></bpmn:serviceTask>
+    <bpmn:serviceTask id="Task_review" name="review" choreo:service="review"><bpmn:incoming>f12</bpmn:incoming><bpmn:outgoing>f13</bpmn:outgoing></bpmn:serviceTask>
+    <bpmn:parallelGateway id="join2"><bpmn:incoming>f11</bpmn:incoming><bpmn:incoming>f13</bpmn:incoming><bpmn:outgoing>f14</bpmn:outgoing></bpmn:parallelGateway>
+    <bpmn:serviceTask id="Task_confirm" name="confirm" choreo:service="confirm"><bpmn:incoming>f14</bpmn:incoming><bpmn:outgoing>f15</bpmn:outgoing></bpmn:serviceTask>
+    <bpmn:endEvent id="end"><bpmn:incoming>f15</bpmn:incoming></bpmn:endEvent>
+    <bpmn:sequenceFlow id="f1" sourceRef="start" targetRef="Task_assess" />
+    <bpmn:sequenceFlow id="f2" sourceRef="Task_assess" targetRef="fork1" />
+    <bpmn:sequenceFlow id="f3" sourceRef="fork1" targetRef="Task_pay" />
+    <bpmn:sequenceFlow id="f4" sourceRef="Task_pay" targetRef="Task_charge" />
+    <bpmn:sequenceFlow id="f5" sourceRef="Task_charge" targetRef="join1" />
+    <bpmn:sequenceFlow id="f6" sourceRef="fork1" targetRef="Task_ship" />
+    <bpmn:sequenceFlow id="f7" sourceRef="Task_ship" targetRef="join1" />
+    <bpmn:sequenceFlow id="f8" sourceRef="join1" targetRef="Task_reserve" />
+    <bpmn:sequenceFlow id="f9" sourceRef="Task_reserve" targetRef="fork2" />
+    <bpmn:sequenceFlow id="f10" sourceRef="fork2" targetRef="Task_notify" />
+    <bpmn:sequenceFlow id="f11" sourceRef="Task_notify" targetRef="join2" />
+    <bpmn:sequenceFlow id="f12" sourceRef="fork2" targetRef="Task_review" />
+    <bpmn:sequenceFlow id="f13" sourceRef="Task_review" targetRef="join2" />
+    <bpmn:sequenceFlow id="f14" sourceRef="join2" targetRef="Task_confirm" />
+    <bpmn:sequenceFlow id="f15" sourceRef="Task_confirm" targetRef="end" />
+  </bpmn:process>
+  <bpmndi:BPMNDiagram id="two-forks-diagram">
+    <bpmndi:BPMNPlane id="two-forks-plane" bpmnElement="two-forks">
+      <bpmndi:BPMNShape id="start_di" bpmnElement="start"><dc:Bounds x="82" y="232" width="36" height="36" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_assess_di" bpmnElement="Task_assess"><dc:Bounds x="160" y="210" width="100" height="80" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="fork1_di" bpmnElement="fork1"><dc:Bounds x="305" y="225" width="50" height="50" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_pay_di" bpmnElement="Task_pay"><dc:Bounds x="400" y="90" width="100" height="80" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_charge_di" bpmnElement="Task_charge"><dc:Bounds x="550" y="90" width="100" height="80" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_ship_di" bpmnElement="Task_ship"><dc:Bounds x="475" y="330" width="100" height="80" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="join1_di" bpmnElement="join1"><dc:Bounds x="705" y="225" width="50" height="50" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_reserve_di" bpmnElement="Task_reserve"><dc:Bounds x="800" y="210" width="100" height="80" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="fork2_di" bpmnElement="fork2"><dc:Bounds x="945" y="225" width="50" height="50" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_notify_di" bpmnElement="Task_notify"><dc:Bounds x="1040" y="90" width="100" height="80" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_review_di" bpmnElement="Task_review"><dc:Bounds x="1040" y="330" width="100" height="80" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="join2_di" bpmnElement="join2"><dc:Bounds x="1185" y="225" width="50" height="50" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_confirm_di" bpmnElement="Task_confirm"><dc:Bounds x="1280" y="210" width="100" height="80" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="end_di" bpmnElement="end"><dc:Bounds x="1432" y="232" width="36" height="36" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge id="f1_di" bpmnElement="f1"><di:waypoint x="118" y="250" /><di:waypoint x="160" y="250" /></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="f2_di" bpmnElement="f2"><di:waypoint x="260" y="250" /><di:waypoint x="305" y="250" /></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="f3_di" bpmnElement="f3"><di:waypoint x="330" y="225" /><di:waypoint x="330" y="130" /><di:waypoint x="400" y="130" /></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="f4_di" bpmnElement="f4"><di:waypoint x="500" y="130" /><di:waypoint x="550" y="130" /></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="f5_di" bpmnElement="f5"><di:waypoint x="650" y="130" /><di:waypoint x="730" y="130" /><di:waypoint x="730" y="225" /></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="f6_di" bpmnElement="f6"><di:waypoint x="330" y="275" /><di:waypoint x="330" y="370" /><di:waypoint x="475" y="370" /></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="f7_di" bpmnElement="f7"><di:waypoint x="575" y="370" /><di:waypoint x="730" y="370" /><di:waypoint x="730" y="275" /></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="f8_di" bpmnElement="f8"><di:waypoint x="755" y="250" /><di:waypoint x="800" y="250" /></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="f9_di" bpmnElement="f9"><di:waypoint x="900" y="250" /><di:waypoint x="945" y="250" /></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="f10_di" bpmnElement="f10"><di:waypoint x="970" y="225" /><di:waypoint x="970" y="130" /><di:waypoint x="1040" y="130" /></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="f11_di" bpmnElement="f11"><di:waypoint x="1140" y="130" /><di:waypoint x="1210" y="130" /><di:waypoint x="1210" y="225" /></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="f12_di" bpmnElement="f12"><di:waypoint x="970" y="275" /><di:waypoint x="970" y="370" /><di:waypoint x="1040" y="370" /></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="f13_di" bpmnElement="f13"><di:waypoint x="1140" y="370" /><di:waypoint x="1210" y="370" /><di:waypoint x="1210" y="275" /></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="f14_di" bpmnElement="f14"><di:waypoint x="1235" y="250" /><di:waypoint x="1280" y="250" /></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="f15_di" bpmnElement="f15"><di:waypoint x="1380" y="250" /><di:waypoint x="1432" y="250" /></bpmndi:BPMNEdge>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+</bpmn:definitions>

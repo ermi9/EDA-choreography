@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
+                  xmlns:dc="http://www.omg.org/spec/DD/20100524/DC"
+                  xmlns:di="http://www.omg.org/spec/DD/20100524/DI"
+                  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                  xmlns:choreo="http://eda.com/choreography"
+                  id="wide-fork-definitions" targetNamespace="http://eda.com/flows">
+  <bpmn:process id="wide-fork" isExecutable="true" choreo:joinTimeout="PT30S">
+    <bpmn:documentation>One fork into four parallel branches joined at confirm. Run with failAt to watch the siblings and the steps before the fork be undone in reverse topological order.</bpmn:documentation>
+    <bpmn:startEvent id="start"><bpmn:outgoing>f1</bpmn:outgoing></bpmn:startEvent>
+    <bpmn:serviceTask id="Task_assess" name="assess" choreo:service="assess"><bpmn:incoming>f1</bpmn:incoming><bpmn:outgoing>f2</bpmn:outgoing></bpmn:serviceTask>
+    <bpmn:serviceTask id="Task_reserve" name="reserve" choreo:service="reserve"><bpmn:incoming>f2</bpmn:incoming><bpmn:outgoing>f3</bpmn:outgoing></bpmn:serviceTask>
+    <bpmn:parallelGateway id="fork"><bpmn:incoming>f3</bpmn:incoming><bpmn:outgoing>f4</bpmn:outgoing><bpmn:outgoing>f6</bpmn:outgoing><bpmn:outgoing>f8</bpmn:outgoing><bpmn:outgoing>f10</bpmn:outgoing></bpmn:parallelGateway>
+    <bpmn:serviceTask id="Task_pay" name="pay" choreo:service="pay"><bpmn:incoming>f4</bpmn:incoming><bpmn:outgoing>f5</bpmn:outgoing></bpmn:serviceTask>
+    <bpmn:serviceTask id="Task_ship" name="ship" choreo:service="ship"><bpmn:incoming>f6</bpmn:incoming><bpmn:outgoing>f7</bpmn:outgoing></bpmn:serviceTask>
+    <bpmn:serviceTask id="Task_notify" name="notify" choreo:service="notify"><bpmn:incoming>f8</bpmn:incoming><bpmn:outgoing>f9</bpmn:outgoing></bpmn:serviceTask>
+    <bpmn:serviceTask id="Task_charge" name="charge" choreo:service="charge"><bpmn:incoming>f10</bpmn:incoming><bpmn:outgoing>f11</bpmn:outgoing></bpmn:serviceTask>
+    <bpmn:parallelGateway id="join"><bpmn:incoming>f5</bpmn:incoming><bpmn:incoming>f7</bpmn:incoming><bpmn:incoming>f9</bpmn:incoming><bpmn:incoming>f11</bpmn:incoming><bpmn:outgoing>f12</bpmn:outgoing></bpmn:parallelGateway>
+    <bpmn:serviceTask id="Task_confirm" name="confirm" choreo:service="confirm"><bpmn:incoming>f12</bpmn:incoming><bpmn:outgoing>f13</bpmn:outgoing></bpmn:serviceTask>
+    <bpmn:endEvent id="end"><bpmn:incoming>f13</bpmn:incoming></bpmn:endEvent>
+    <bpmn:task id="Undo_Task_assess" name="release hold" isForCompensation="true" />
+    <bpmn:task id="Undo_Task_reserve" name="release stock" isForCompensation="true" />
+    <bpmn:task id="Undo_Task_pay" name="refund" isForCompensation="true" />
+    <bpmn:task id="Undo_Task_ship" name="cancel shipment" isForCompensation="true" />
+    <bpmn:task id="Undo_Task_notify" name="send correction" isForCompensation="true" />
+    <bpmn:task id="Undo_Task_charge" name="reverse charge" isForCompensation="true" />
+    <bpmn:boundaryEvent id="Comp_Task_assess" attachedToRef="Task_assess"><bpmn:compensateEventDefinition id="CompDef_Task_assess" /></bpmn:boundaryEvent>
+    <bpmn:boundaryEvent id="Comp_Task_reserve" attachedToRef="Task_reserve"><bpmn:compensateEventDefinition id="CompDef_Task_reserve" /></bpmn:boundaryEvent>
+    <bpmn:boundaryEvent id="Comp_Task_pay" attachedToRef="Task_pay"><bpmn:compensateEventDefinition id="CompDef_Task_pay" /></bpmn:boundaryEvent>
+    <bpmn:boundaryEvent id="Comp_Task_ship" attachedToRef="Task_ship"><bpmn:compensateEventDefinition id="CompDef_Task_ship" /></bpmn:boundaryEvent>
+    <bpmn:boundaryEvent id="Comp_Task_notify" attachedToRef="Task_notify"><bpmn:compensateEventDefinition id="CompDef_Task_notify" /></bpmn:boundaryEvent>
+    <bpmn:boundaryEvent id="Comp_Task_charge" attachedToRef="Task_charge"><bpmn:compensateEventDefinition id="CompDef_Task_charge" /></bpmn:boundaryEvent>
+    <bpmn:sequenceFlow id="f1" sourceRef="start" targetRef="Task_assess" />
+    <bpmn:sequenceFlow id="f2" sourceRef="Task_assess" targetRef="Task_reserve" />
+    <bpmn:sequenceFlow id="f3" sourceRef="Task_reserve" targetRef="fork" />
+    <bpmn:sequenceFlow id="f4" sourceRef="fork" targetRef="Task_pay" />
+    <bpmn:sequenceFlow id="f5" sourceRef="Task_pay" targetRef="join" />
+    <bpmn:sequenceFlow id="f6" sourceRef="fork" targetRef="Task_ship" />
+    <bpmn:sequenceFlow id="f7" sourceRef="Task_ship" targetRef="join" />
+    <bpmn:sequenceFlow id="f8" sourceRef="fork" targetRef="Task_notify" />
+    <bpmn:sequenceFlow id="f9" sourceRef="Task_notify" targetRef="join" />
+    <bpmn:sequenceFlow id="f10" sourceRef="fork" targetRef="Task_charge" />
+    <bpmn:sequenceFlow id="f11" sourceRef="Task_charge" targetRef="join" />
+    <bpmn:sequenceFlow id="f12" sourceRef="join" targetRef="Task_confirm" />
+    <bpmn:sequenceFlow id="f13" sourceRef="Task_confirm" targetRef="end" />
+    <bpmn:association id="Assoc_Task_assess" associationDirection="One" sourceRef="Comp_Task_assess" targetRef="Undo_Task_assess" />
+    <bpmn:association id="Assoc_Task_reserve" associationDirection="One" sourceRef="Comp_Task_reserve" targetRef="Undo_Task_reserve" />
+    <bpmn:association id="Assoc_Task_pay" associationDirection="One" sourceRef="Comp_Task_pay" targetRef="Undo_Task_pay" />
+    <bpmn:association id="Assoc_Task_ship" associationDirection="One" sourceRef="Comp_Task_ship" targetRef="Undo_Task_ship" />
+    <bpmn:association id="Assoc_Task_notify" associationDirection="One" sourceRef="Comp_Task_notify" targetRef="Undo_Task_notify" />
+    <bpmn:association id="Assoc_Task_charge" associationDirection="One" sourceRef="Comp_Task_charge" targetRef="Undo_Task_charge" />
+  </bpmn:process>
+  <bpmndi:BPMNDiagram id="wide-fork-diagram">
+    <bpmndi:BPMNPlane id="wide-fork-plane" bpmnElement="wide-fork">
+      <bpmndi:BPMNShape id="start_di" bpmnElement="start"><dc:Bounds x="82" y="342" width="36" height="36" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_assess_di" bpmnElement="Task_assess"><dc:Bounds x="170" y="320" width="100" height="80" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_reserve_di" bpmnElement="Task_reserve"><dc:Bounds x="350" y="320" width="100" height="80" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="fork_di" bpmnElement="fork"><dc:Bounds x="575" y="335" width="50" height="50" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_pay_di" bpmnElement="Task_pay"><dc:Bounds x="690" y="20" width="100" height="80" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_ship_di" bpmnElement="Task_ship"><dc:Bounds x="690" y="220" width="100" height="80" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_notify_di" bpmnElement="Task_notify"><dc:Bounds x="690" y="420" width="100" height="80" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_charge_di" bpmnElement="Task_charge"><dc:Bounds x="690" y="620" width="100" height="80" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="join_di" bpmnElement="join"><dc:Bounds x="935" y="335" width="50" height="50" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_confirm_di" bpmnElement="Task_confirm"><dc:Bounds x="1040" y="320" width="100" height="80" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="end_di" bpmnElement="end"><dc:Bounds x="1202" y="342" width="36" height="36" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Undo_Task_assess_di" bpmnElement="Undo_Task_assess"><dc:Bounds x="265" y="430" width="100" height="60" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Undo_Task_reserve_di" bpmnElement="Undo_Task_reserve"><dc:Bounds x="445" y="430" width="100" height="60" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Undo_Task_pay_di" bpmnElement="Undo_Task_pay"><dc:Bounds x="785" y="130" width="100" height="60" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Undo_Task_ship_di" bpmnElement="Undo_Task_ship"><dc:Bounds x="785" y="330" width="100" height="60" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Undo_Task_notify_di" bpmnElement="Undo_Task_notify"><dc:Bounds x="785" y="530" width="100" height="60" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Undo_Task_charge_di" bpmnElement="Undo_Task_charge"><dc:Bounds x="785" y="730" width="100" height="60" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Comp_Task_assess_di" bpmnElement="Comp_Task_assess"><dc:Bounds x="234" y="382" width="36" height="36" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Comp_Task_reserve_di" bpmnElement="Comp_Task_reserve"><dc:Bounds x="414" y="382" width="36" height="36" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Comp_Task_pay_di" bpmnElement="Comp_Task_pay"><dc:Bounds x="754" y="82" width="36" height="36" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Comp_Task_ship_di" bpmnElement="Comp_Task_ship"><dc:Bounds x="754" y="282" width="36" height="36" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Comp_Task_notify_di" bpmnElement="Comp_Task_notify"><dc:Bounds x="754" y="482" width="36" height="36" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Comp_Task_charge_di" bpmnElement="Comp_Task_charge"><dc:Bounds x="754" y="682" width="36" height="36" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge id="f1_di" bpmnElement="f1"><di:waypoint x="118" y="360" /><di:waypoint x="170" y="360" /></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="f2_di" bpmnElement="f2"><di:waypoint x="270" y="360" /><di:waypoint x="350" y="360" /></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="f3_di" bpmnElement="f3"><di:waypoint x="450" y="360" /><di:waypoint x="575" y="360" /></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="f4_di" bpmnElement="f4"><di:waypoint x="600" y="335" /><di:waypoint x="600" y="60" /><di:waypoint x="690" y="60" /></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="f5_di" bpmnElement="f5"><di:waypoint x="790" y="60" /><di:waypoint x="960" y="60" /><di:waypoint x="960" y="335" /></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="f6_di" bpmnElement="f6"><di:waypoint x="600" y="335" /><di:waypoint x="600" y="260" /><di:waypoint x="690" y="260" /></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="f7_di" bpmnElement="f7"><di:waypoint x="790" y="260" /><di:waypoint x="960" y="260" /><di:waypoint x="960" y="335" /></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="f8_di" bpmnElement="f8"><di:waypoint x="600" y="385" /><di:waypoint x="600" y="460" /><di:waypoint x="690" y="460" /></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="f9_di" bpmnElement="f9"><di:waypoint x="790" y="460" /><di:waypoint x="960" y="460" /><di:waypoint x="960" y="385" /></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="f10_di" bpmnElement="f10"><di:waypoint x="600" y="385" /><di:waypoint x="600" y="660" /><di:waypoint x="690" y="660" /></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="f11_di" bpmnElement="f11"><di:waypoint x="790" y="660" /><di:waypoint x="960" y="660" /><di:waypoint x="960" y="385" /></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="f12_di" bpmnElement="f12"><di:waypoint x="985" y="360" /><di:waypoint x="1040" y="360" /></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="f13_di" bpmnElement="f13"><di:waypoint x="1140" y="360" /><di:waypoint x="1202" y="360" /></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Assoc_Task_assess_di" bpmnElement="Assoc_Task_assess"><di:waypoint x="252" y="418" /><di:waypoint x="252" y="460" /><di:waypoint x="265" y="460" /></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Assoc_Task_reserve_di" bpmnElement="Assoc_Task_reserve"><di:waypoint x="432" y="418" /><di:waypoint x="432" y="460" /><di:waypoint x="445" y="460" /></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Assoc_Task_pay_di" bpmnElement="Assoc_Task_pay"><di:waypoint x="772" y="118" /><di:waypoint x="772" y="160" /><di:waypoint x="785" y="160" /></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Assoc_Task_ship_di" bpmnElement="Assoc_Task_ship"><di:waypoint x="772" y="318" /><di:waypoint x="772" y="360" /><di:waypoint x="785" y="360" /></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Assoc_Task_notify_di" bpmnElement="Assoc_Task_notify"><di:waypoint x="772" y="518" /><di:waypoint x="772" y="560" /><di:waypoint x="785" y="560" /></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Assoc_Task_charge_di" bpmnElement="Assoc_Task_charge"><di:waypoint x="772" y="718" /><di:waypoint x="772" y="760" /><di:waypoint x="785" y="760" /></bpmndi:BPMNEdge>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+</bpmn:definitions>
