@@ -39,6 +39,13 @@ class PlannedJoinWaitsTest {
     }
 
     @Test
+    void knowsWhichStepsOfAFlowAreJoins() {
+        assertThat(waits.isJoin("returns", "confirm")).isTrue();
+        assertThat(waits.isJoin("returns", "refund")).isFalse();
+        assertThat(waits.isJoin("unknown", "confirm")).isFalse();
+    }
+
+    @Test
     void aFlowWithoutAPlanCannotBeJoined() {
         assertThatThrownBy(() -> waits.forJoin("unknown", "confirm")).isInstanceOf(NoRouteException.class);
     }

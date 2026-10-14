@@ -19,6 +19,14 @@ public final class PlannedJoinWaits implements JoinWaits {
         this.defaultTimeout = Objects.requireNonNull(defaultTimeout, "defaultTimeout");
     }
 
+    /** Whether a step of a flow is a join; a flow without a plan has none. */
+    public boolean isJoin(String flowName, String step) {
+        return plans.forFlow(flowName)
+                .flatMap(plan -> plan.node(step))
+                .map(node -> node.kind() == PlanNode.Kind.JOIN)
+                .orElse(false);
+    }
+
     @Override
     public JoinWait forJoin(String flowName, String joinStep) {
         var plan = plans.forFlow(flowName).orElseThrow(() ->

@@ -5,6 +5,7 @@ import com.eda.choreography.domain.compensation.CompensationRunner;
 import com.eda.choreography.domain.message.ChoreographyMessage;
 import com.eda.choreography.domain.step.JoinRunner;
 import com.eda.choreography.domain.step.NextHopUnavailableException;
+import com.eda.choreography.domain.step.ServiceRunner;
 import com.eda.choreography.domain.step.StepRunner;
 import java.time.Duration;
 import java.util.Objects;
@@ -88,11 +89,27 @@ public class StepContainerFactory {
                 forJoin(runner, runner::failNextHop));
     }
 
+    /**
+     * A service that runs plain steps and join steps, as each message's flow says. Its topic
+     * carries both, and the timeout notices of its joins.
+     */
+    public ConcurrentMessageListenerContainer<String, ChoreographyMessage> create(ServiceRunner runner) {
+        return messageContainer(runner.stepId(),
+                orTimeOut(runner::timeOut, runner::handle),
+                orTimeOut(runner::timeOut, runner::fail),
+                orTimeOut(runner::timeOut, runner::failNextHop));
+    }
+
     private static Consumer<ConsumerRecord<String, ChoreographyMessage>> forJoin(
             JoinRunner runner, Consumer<ChoreographyMessage> branch) {
+        return orTimeOut(runner::timeOut, branch);
+    }
+
+    private static Consumer<ConsumerRecord<String, ChoreographyMessage>> orTimeOut(
+            Consumer<String> timeOut, Consumer<ChoreographyMessage> branch) {
         return record -> {
             if (KafkaJoinTimeoutNotices.isTimeoutNotice(record.headers())) {
-                runner.timeOut(record.key());
+                timeOut.accept(record.key());
             } else {
                 branch.accept(record.value());
             }
