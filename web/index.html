@@ -34,6 +34,17 @@
   table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 8px; }
   td, th { text-align: left; padding: 4px; border-bottom: 1px solid var(--line); }
   .FAILED { color: var(--bad); font-weight: 600; }
+  .UNDONE { color: var(--undo); font-weight: 600; }
+  :root { --undo: #b54708; }
+  ol.stages { margin: 6px 0 0; padding-left: 20px; font-size: 13px; }
+  ol.stages li { margin: 2px 0; }
+  .djs-element.run-done .djs-visual > :first-child { stroke: var(--ok) !important; fill: #e7f6ef !important; }
+  .djs-element.run-failed .djs-visual > :first-child { stroke: var(--bad) !important; fill: #fdecea !important; }
+  .djs-element.run-undone .djs-visual > :first-child { stroke: var(--undo) !important; fill: #fff4e5 !important; stroke-dasharray: 6 3; }
+  .badge { font: 600 11px/1 system-ui, sans-serif; padding: 3px 6px; border-radius: 10px; color: #fff; white-space: nowrap; }
+  .badge.done { background: var(--ok); }
+  .badge.failed { background: var(--bad); }
+  .badge.undone { background: var(--undo); }
 </style>
 </head>
 <body>
@@ -175,14 +186,21 @@ async function loadStoredNames() {
 
 $('new').onclick = newDiagram;
 
+async function loadFlow(name) {
+  await modeler.importXML(await api('GET', '/api/flows/' + encodeURIComponent(name)));
+  const canvas = modeler.get('canvas');
+  canvas.zoom('fit-viewport', 'auto');
+  canvas.zoom(canvas.zoom() * 0.9, 'auto');
+  $('flow-name').value = name;
+  $('join-timeout').value = processElement().get('choreo:joinTimeout') || '';
+  $('run-result').innerHTML = '';
+}
+
 $('load').onclick = async () => {
   const name = $('stored').value;
   if (!name) { return; }
   try {
-    await modeler.importXML(await api('GET', '/api/flows/' + encodeURIComponent(name)));
-    modeler.get('canvas').zoom('fit-viewport');
-    $('flow-name').value = name;
-    $('join-timeout').value = processElement().get('choreo:joinTimeout') || '';
+    await loadFlow(name);
     say('Loaded ' + name + '.', 'success');
   } catch (e) { say('Load: ' + e.message, 'error'); }
 };
@@ -206,19 +224,107 @@ $('run').onclick = async () => {
     JSON.parse($('input').value || '{}');
     const { correlationId } = await api('POST', '/api/flows/' + encodeURIComponent(name) + '/runs', $('input').value || '{}', 'application/json');
     say('Started ' + correlationId + ' …');
-    for (let attempt = 0; attempt < 120; attempt++) {
+    clearRun();
+    // An instance can be compensated more than once (a join that timed out, then its late
+    // branch), so after the first compensation keep watching a little for the next one.
+    const compensations = [];
+    let watchUntil = Infinity;
+    for (let attempt = 0; attempt < 120 && Date.now() < watchUntil; attempt++) {
       await new Promise(resolve => setTimeout(resolve, 1000));
       const run = await api('GET', '/api/runs/' + encodeURIComponent(correlationId));
-      if (run.status !== 'RUNNING') { showRun(run); return; }
+      if (run.status === 'COMPLETED') { showRun(run, []); return; }
+      if (run.status === 'COMPENSATED') {
+        const ids = run.trace.map(entry => entry.id).sort().join();
+        if (!compensations.some(seen => seen.ids === ids)) {
+          compensations.push({ ids, run });
+          showRun(run, compensations.map(seen => seen.run));
+        }
+        watchUntil = Math.min(watchUntil, Date.now() + 10000);
+      }
     }
-    say(correlationId + ' is still running after two minutes.', 'error');
+    if (!compensations.length) { say(correlationId + ' is still running after two minutes.', 'error'); }
   } catch (e) { say('Run: ' + e.message, 'error'); }
 };
 
-function showRun(run) {
+// The stages a compensation undoes the trace in, as CompensationOrdering derives them: waves of
+// Kahn's algorithm on the reversed trace, leaving out failed entries and those already undone.
+function compensationStages(trace, alreadyUndone) {
+  const children = new Map(trace.map(entry => [entry.id, 0]));
+  trace.forEach(entry => entry.parents.forEach(parent => children.set(parent, (children.get(parent) || 0) + 1)));
+  const byId = new Map(trace.map(entry => [entry.id, entry]));
+  let wave = trace.filter(entry => children.get(entry.id) === 0);
+  const stages = [];
+  while (wave.length) {
+    const stage = wave.filter(entry => entry.outcome === 'COMPLETED' && !alreadyUndone.has(entry.id));
+    if (stage.length) { stages.push(stage); }
+    const next = [];
+    wave.forEach(entry => entry.parents.forEach(parent => {
+      children.set(parent, children.get(parent) - 1);
+      if (children.get(parent) === 0 && byId.has(parent)) { next.push(byId.get(parent)); }
+    }));
+    wave = next;
+  }
+  return stages;
+}
+
+function shapesOf(step) {
+  return modeler.get('elementRegistry').filter(element => {
+    const bo = element.businessObject;
+    return bo.$instanceOf('bpmn:Task') && !bo.isForCompensation
+        && (element.id === step || bo.get('choreo:service') === step || (!bo.get('choreo:service') && bo.name === step));
+  });
+}
+
+let painted = [];
+
+function clearRun() {
+  const canvas = modeler.get('canvas');
+  painted.filter(id => modeler.get('elementRegistry').get(id))
+      .forEach(id => ['run-done', 'run-failed', 'run-undone'].forEach(marker => canvas.removeMarker(id, marker)));
+  painted = [];
+  modeler.get('overlays').remove({ type: 'run' });
+  $('run-result').innerHTML = '';
+}
+
+function paint(step, marker, label) {
+  shapesOf(step).forEach(shape => {
+    modeler.get('canvas').addMarker(shape.id, 'run-' + marker);
+    painted.push(shape.id);
+    modeler.get('overlays').add(shape.id, 'run', { position: { top: -11, left: 4 }, html: '<span class="badge ' + marker + '">' + label + '</span>' });
+  });
+}
+
+function showRun(run, compensations) {
+  clearRun();
+  const undoneAt = new Map();
+  const rounds = [];
+  compensations.forEach(compensated => {
+    const stages = compensationStages(compensated.trace, new Set(undoneAt.keys()));
+    stages.forEach((stage, i) => stage.forEach(entry => undoneAt.set(entry.id, { round: rounds.length + 1, stage: i + 1 })));
+    rounds.push(stages);
+  });
+  const entries = new Map();
+  [run, ...compensations].forEach(r => r.trace.forEach(entry => entries.set(entry.id, entry)));
+  for (const entry of entries.values()) {
+    const undone = undoneAt.get(entry.id);
+    if (entry.outcome === 'FAILED') { paint(entry.step, 'failed', '✗ failed'); }
+    else if (undone) { paint(entry.step, 'undone', '↶ undone · stage ' + undone.stage + (rounds.length > 1 ? ' (' + undone.round + ')' : '')); }
+    else { paint(entry.step, 'done', '✓ done'); }
+  }
+
   say(run.correlationId + ': ' + run.status, run.status === 'COMPLETED' ? 'success' : 'error');
-  const rows = run.trace.map(entry => '<tr><td>' + entry.step + '</td><td>' + entry.service + '</td><td class="' + entry.outcome + '">' + entry.outcome + '</td><td>' + entry.parents.length + '</td></tr>').join('');
-  $('run-result').innerHTML = '<table><tr><th>Step</th><th>Service</th><th>Outcome</th><th>Parents</th></tr>' + rows + '</table>';
+  const rows = [...entries.values()].map(entry => {
+    const undone = undoneAt.get(entry.id);
+    const outcome = undone ? 'UNDONE' : entry.outcome;
+    return '<tr><td>' + entry.step + '</td><td>' + entry.service + '</td><td class="' + outcome + '">' + outcome + '</td><td>' + entry.parents.length + '</td></tr>';
+  }).join('');
+  let html = '<table><tr><th>Step</th><th>Service</th><th>Outcome</th><th>Parents</th></tr>' + rows + '</table>';
+  rounds.forEach((stages, i) => {
+    html += '<h2>' + (rounds.length > 1 ? 'Compensation ' + (i + 1) : 'Compensation order') + '</h2><ol class="stages">'
+        + stages.map(stage => '<li>' + stage.map(entry => entry.step).join(', ') + (stage.length > 1 ? ' <span class="hint">(in parallel)</span>' : '') + '</li>').join('')
+        + '</ol>';
+  });
+  $('run-result').innerHTML = html;
 }
 
 newDiagram();
