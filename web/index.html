@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Choreography flow editor</title>
+<link rel="stylesheet" href="https://unpkg.com/bpmn-js@18.31.0/dist/assets/diagram-js.css">
+<link rel="stylesheet" href="https://unpkg.com/bpmn-js@18.31.0/dist/assets/bpmn-js.css">
+<link rel="stylesheet" href="https://unpkg.com/bpmn-js@18.31.0/dist/assets/bpmn-font/css/bpmn.css">
+<style>
+  :root { --ink: #1d2433; --muted: #667085; --line: #e4e7ec; --accent: #3056d3; --ok: #12805c; --bad: #c4320a; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; color: var(--ink); height: 100vh; display: grid; grid-template-columns: 1fr 340px; }
+  #canvas { height: 100vh; border-right: 1px solid var(--line); }
+  aside { overflow-y: auto; padding: 16px; background: #fafbfc; }
+  h1 { font-size: 16px; margin: 0 0 4px; }
+  h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 20px 0 8px; }
+  p.hint { color: var(--muted); margin: 0 0 8px; font-size: 13px; }
+  label { display: block; font-size: 13px; color: var(--muted); margin: 8px 0 4px; }
+  input, textarea, select { width: 100%; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; font: inherit; background: #fff; }
+  textarea { font-family: ui-monospace, monospace; font-size: 12px; min-height: 64px; }
+  button { padding: 6px 12px; border: 1px solid var(--accent); background: var(--accent); color: #fff; border-radius: 6px; font: inherit; cursor: pointer; }
+  button.secondary { background: #fff; color: var(--accent); }
+  .row { display: flex; gap: 8px; margin-top: 8px; }
+  .row > * { flex: 1; }
+  ul.catalog { list-style: none; padding: 0; margin: 0; max-height: 200px; overflow-y: auto; border: 1px solid var(--line); border-radius: 6px; background: #fff; }
+  ul.catalog li { padding: 5px 8px; cursor: pointer; display: flex; align-items: center; gap: 8px; }
+  ul.catalog li:hover { background: #eef2ff; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--bad); flex: none; }
+  .dot.live { background: var(--ok); }
+  #message { margin-top: 10px; font-size: 13px; white-space: pre-wrap; }
+  .error { color: var(--bad); }
+  .success { color: var(--ok); }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 8px; }
+  td, th { text-align: left; padding: 4px; border-bottom: 1px solid var(--line); }
+  .FAILED { color: var(--bad); font-weight: 600; }
+</style>
+</head>
+<body>
+<div id="canvas"></div>
+<aside>
+  <h1>Choreography flow editor</h1>
+  <p class="hint">Draw tasks, exclusive gateways (choices) and parallel gateways (fork and join). Pick each task's service from the catalog. Then save the flow and run it.</p>
+
+  <h2>Flow</h2>
+  <label for="flow-name">Name</label>
+  <input id="flow-name" value="my-flow" pattern="[A-Za-z0-9._-]+">
+  <label for="join-timeout">Join timeout (ISO-8601, e.g. PT30S)</label>
+  <input id="join-timeout" placeholder="default of the engine">
+  <div class="row"><button id="save">Save</button><button class="secondary" id="new">New</button></div>
+  <label for="stored">Stored flows</label>
+  <div class="row"><select id="stored"></select><button class="secondary" id="load">Load</button></div>
+
+  <h2>Selected element</h2>
+  <p class="hint" id="selected">Nothing selected.</p>
+  <div id="task-panel" hidden>
+    <label>Service, from the discovery catalog (green = live)</label>
+    <ul class="catalog" id="catalog"></ul>
+    <label for="custom-service">Or a service that does not exist yet (late-bound)</label>
+    <div class="row"><input id="custom-service" placeholder="e.g. fraud-check"><button class="secondary" id="apply-custom">Use</button></div>
+  </div>
+  <div id="flow-panel" hidden>
+    <label for="condition">Condition on the previous task's result (SpEL)</label>
+    <input id="condition" placeholder="#result['amount'] > 1000">
+    <label><input type="checkbox" id="is-default" style="width:auto"> The choice's default path</label>
+    <div class="row"><button class="secondary" id="apply-condition">Apply</button></div>
+  </div>
+
+  <h2>Run</h2>
+  <label for="input">Request (JSON)</label>
+  <textarea id="input">{"amount": 5000}</textarea>
+  <div class="row"><button id="run">Run saved flow</button></div>
+  <div id="message"></div>
+  <div id="run-result"></div>
+</aside>
+
+<script src="https://unpkg.com/bpmn-js@18.31.0/dist/bpmn-modeler.production.min.js"></script>
+<script>
+// The engine's API; same origin by default, or ?api=https://engine-host for an editor hosted elsewhere.
+const API = new URLSearchParams(location.search).get('api') || '';
+
+// choreo:service on tasks and choreo:joinTimeout on the process, as the engine's BpmnPlanner reads them.
+const choreography = {
+  name: 'Choreography', prefix: 'choreo', uri: 'http://eda.com/choreography', xml: { tagAlias: 'lowerCase' },
+  types: [
+    { name: 'ServiceOfTask', extends: ['bpmn:Task'], properties: [{ name: 'service', isAttr: true, type: 'String' }] },
+    { name: 'TimedProcess', extends: ['bpmn:Process'], properties: [{ name: 'joinTimeout', isAttr: true, type: 'String' }] }
+  ]
+};
+
+const modeler = new BpmnJS({ container: '#canvas', moddleExtensions: { choreo: choreography } });
+const modeling = modeler.get('modeling');
+const moddle = modeler.get('moddle');
+let selected = null;
+
+const $ = id => document.getElementById(id);
+function say(text, kind) { $('message').textContent = text; $('message').className = kind || ''; }
+
+async function api(method, path, body, type) {
+  const response = await fetch(API + path, { method, headers: body ? { 'Content-Type': type } : {}, body });
+  const text = await response.text();
+  let data = text;
+  try { data = JSON.parse(text); } catch (ignored) { }
+  if (!response.ok) { throw new Error((data && data.error) || response.status + ' ' + text); }
+  return data;
+}
+
+async function newDiagram() {
+  await modeler.createDiagram();
+  modeler.get('canvas').zoom('fit-viewport');
+  $('join-timeout').value = '';
+}
+
+function processElement() {
+  return modeler.get('canvas').getRootElement().businessObject;
+}
+
+modeler.get('eventBus').on('selection.changed', ({ newSelection }) => {
+  selected = newSelection.length === 1 ? newSelection[0] : null;
+  const bo = selected && selected.businessObject;
+  const isTask = bo && bo.$instanceOf('bpmn:Task');
+  const isChoiceFlow = bo && bo.$type === 'bpmn:SequenceFlow' && bo.sourceRef.$type === 'bpmn:ExclusiveGateway';
+  $('task-panel').hidden = !isTask;
+  $('flow-panel').hidden = !isChoiceFlow;
+  if (!bo) { $('selected').textContent = 'Nothing selected.'; return; }
+  $('selected').textContent = bo.$type.replace('bpmn:', '') + (isTask ? ' — service: ' + (bo.get('choreo:service') || bo.name || 'none yet') : '');
+  if (isChoiceFlow) {
+    $('condition').value = bo.conditionExpression ? bo.conditionExpression.body : '';
+    $('is-default').checked = bo.sourceRef.default === bo;
+  }
+});
+
+function useService(name) {
+  if (!selected || !/^[A-Za-z0-9._-]+$/.test(name)) { say('A service name may only hold letters, digits, ".", "_" and "-".', 'error'); return; }
+  modeling.updateProperties(selected, { name, 'choreo:service': name });
+  $('selected').textContent = 'Task — service: ' + name;
+}
+
+$('apply-custom').onclick = () => useService($('custom-service').value.trim());
+
+$('apply-condition').onclick = () => {
+  const bo = selected.businessObject;
+  if ($('is-default').checked) {
+    modeling.updateProperties(selected.source, { default: bo });
+    modeling.updateProperties(selected, { conditionExpression: undefined });
+  } else {
+    if (bo.sourceRef.default === bo) { modeling.updateProperties(selected.source, { default: undefined }); }
+    const body = $('condition').value.trim();
+    modeling.updateProperties(selected, { conditionExpression: body ? moddle.create('bpmn:FormalExpression', { body }) : undefined });
+  }
+  say('Condition applied.', 'success');
+};
+
+async function loadCatalog() {
+  try {
+    const services = await api('GET', '/api/catalog');
+    $('catalog').innerHTML = '';
+    for (const service of services) {
+      const item = document.createElement('li');
+      item.innerHTML = '<span class="dot' + (service.live ? ' live' : '') + '"></span>';
+      item.append(service.name);
+      item.onclick = () => useService(service.name);
+      $('catalog').append(item);
+    }
+    if (!services.length) { $('catalog').innerHTML = '<li>Discovery knows no services yet.</li>'; }
+  } catch (e) { say('Catalog: ' + e.message, 'error'); }
+}
+
+async function loadStoredNames() {
+  try {
+    const names = await api('GET', '/api/flows');
+    $('stored').innerHTML = names.map(name => '<option>' + name + '</option>').join('');
+  } catch (e) { say('Stored flows: ' + e.message, 'error'); }
+}
+
+$('new').onclick = newDiagram;
+
+$('load').onclick = async () => {
+  const name = $('stored').value;
+  if (!name) { return; }
+  try {
+    await modeler.importXML(await api('GET', '/api/flows/' + encodeURIComponent(name)));
+    modeler.get('canvas').zoom('fit-viewport');
+    $('flow-name').value = name;
+    $('join-timeout').value = processElement().get('choreo:joinTimeout') || '';
+    say('Loaded ' + name + '.', 'success');
+  } catch (e) { say('Load: ' + e.message, 'error'); }
+};
+
+$('save').onclick = async () => {
+  const name = $('flow-name').value.trim();
+  const timeout = $('join-timeout').value.trim();
+  modeling.updateProperties(modeler.get('canvas').getRootElement(), { 'choreo:joinTimeout': timeout || undefined });
+  try {
+    const { xml } = await modeler.saveXML({ format: true });
+    const saved = await api('PUT', '/api/flows/' + encodeURIComponent(name), xml, 'application/xml');
+    say('Saved ' + name + '. Starts at ' + saved.start + '.' + (saved.lateBound.length ? '\nLate-bound (not in discovery yet): ' + saved.lateBound.join(', ') : ''), 'success');
+    loadStoredNames();
+  } catch (e) { say('Rejected: ' + e.message, 'error'); }
+};
+
+$('run').onclick = async () => {
+  const name = $('flow-name').value.trim();
+  $('run-result').innerHTML = '';
+  try {
+    JSON.parse($('input').value || '{}');
+    const { correlationId } = await api('POST', '/api/flows/' + encodeURIComponent(name) + '/runs', $('input').value || '{}', 'application/json');
+    say('Started ' + correlationId + ' …');
+    for (let attempt = 0; attempt < 120; attempt++) {
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      const run = await api('GET', '/api/runs/' + encodeURIComponent(correlationId));
+      if (run.status !== 'RUNNING') { showRun(run); return; }
+    }
+    say(correlationId + ' is still running after two minutes.', 'error');
+  } catch (e) { say('Run: ' + e.message, 'error'); }
+};
+
+function showRun(run) {
+  say(run.correlationId + ': ' + run.status, run.status === 'COMPLETED' ? 'success' : 'error');
+  const rows = run.trace.map(entry => '<tr><td>' + entry.step + '</td><td>' + entry.service + '</td><td class="' + entry.outcome + '">' + entry.outcome + '</td><td>' + entry.parents.length + '</td></tr>').join('');
+  $('run-result').innerHTML = '<table><tr><th>Step</th><th>Service</th><th>Outcome</th><th>Parents</th></tr>' + rows + '</table>';
+}
+
+newDiagram();
+loadCatalog();
+loadStoredNames();
+setInterval(loadCatalog, 10000);
+</script>
+</body>
+</html>

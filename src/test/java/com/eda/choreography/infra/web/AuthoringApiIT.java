@@ -66,6 +66,14 @@ class AuthoringApiIT extends AbstractInfraIT {
         assertThat(json(send("GET", "/api/runs/nobody", null)).get("status").asString()).isEqualTo("RUNNING");
     }
 
+    @Test
+    void servesTheEditor() throws Exception {
+        var page = send("GET", "/", null);
+
+        assertThat(page.statusCode()).isEqualTo(200);
+        assertThat(page.body()).contains("Choreography flow editor").contains("bpmn-js@18.31.0");
+    }
+
     private HttpResponse<String> send(String method, String path, String body) throws IOException, InterruptedException {
         var request = HttpRequest.newBuilder(URI.create("http://localhost:" + port + path))
                 .header("Content-Type", path.endsWith("/runs") ? "application/json" : "application/xml")
