@@ -9,7 +9,8 @@ import java.util.Optional;
 
 /**
  * Test fixture: routing written out by hand, step by step, with the join each fork branch ends
- * at. INC-5 derives the same answers from a {@code PlanModel}.
+ * at. {@code PlannedRoutes} derives the same answers from a {@code PlanModel}; these tests keep
+ * the routing in plain sight because what they test is the step, join and compensation runtime.
  */
 final class Routes implements NextSteps {
 

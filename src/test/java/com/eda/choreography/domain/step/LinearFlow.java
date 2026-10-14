@@ -4,8 +4,8 @@ import com.eda.choreography.domain.message.ChoreographyMessage;
 import java.util.List;
 
 /**
- * Test fixture: a hardcoded linear flow, the routing INC-3's walking skeleton runs on. INC-5
- * replaces it with routing derived from a {@code PlanModel}.
+ * Test fixture: a hardcoded linear flow, the routing INC-3's walking skeleton runs on. Routing
+ * derived from a {@code PlanModel} is {@code PlannedRoutes}.
  */
 public record LinearFlow(String flowName, List<String> steps) implements NextSteps {
 
