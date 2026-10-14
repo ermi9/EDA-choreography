@@ -47,7 +47,10 @@ public final class ServiceEventsListener {
                 Map.of(
                         ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers,
                         ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest",
-                        ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, false),
+                        ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, false,
+                        // Discovery declares the topic compacted. An engine that starts first must
+                        // wait for it, not have the broker create a plain one.
+                        ConsumerConfig.ALLOW_AUTO_CREATE_TOPICS_CONFIG, false),
                 new StringDeserializer(),
                 deserializer());
     }
