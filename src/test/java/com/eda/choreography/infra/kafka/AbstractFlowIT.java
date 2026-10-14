@@ -95,13 +95,18 @@ abstract class AbstractFlowIT extends AbstractInfraIT {
      * and has discovery register the steps' services, so they resolve.
      */
     void createTopicsFor(String... steps) throws Exception {
+        createTopicsWithoutRegistering(steps);
+        registerWithDiscovery(steps);
+    }
+
+    /** Creates the topics as {@link #createTopicsFor} does, but discovery does not know the steps yet. */
+    void createTopicsWithoutRegistering(String... steps) throws Exception {
         var topics = new ArrayList<String>(List.of(completedTopic, compensatedTopic, compensationFailedTopic));
         for (var step : steps) {
             topics.add(StepTopics.inputTopic(step));
             topics.add(StepTopics.compensationTopic(step));
         }
         createTopics(topics.toArray(String[]::new));
-        registerWithDiscovery(steps);
     }
 
     /** Starts a step together with the compensator that undoes it. */
@@ -111,7 +116,8 @@ abstract class AbstractFlowIT extends AbstractInfraIT {
 
     /** Starts a step together with a compensator that undoes it the given way. */
     void startStep(String stepId, StepAction action, NextSteps routes, CompensationAction undo) {
-        start(containers.create(new StepRunner(stepId, action, routes, publisher, compensations)));
+        start(containers.create(
+                new StepRunner(stepId, action, routes, publisher, compensations, serviceTable::isLive)));
         startCompensator(stepId, undo);
     }
 
@@ -126,7 +132,7 @@ abstract class AbstractFlowIT extends AbstractInfraIT {
 
     JoinRunner joinRunner(String stepId, StepAction action, NextSteps routes, int branches, Duration timeout) {
         return new JoinRunner(
-                new StepRunner(stepId, action, routes, publisher, compensations),
+                new StepRunner(stepId, action, routes, publisher, compensations, serviceTable::isLive),
                 branches, timeout, new JoinStateMachine(joinStore), deadlines, compensations, Clock.systemUTC());
     }
 

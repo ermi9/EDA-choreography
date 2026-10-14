@@ -14,4 +14,9 @@ public interface ResolutionSource {
      * deregistered stays known, but not live, so the steps it already ran can still be undone.
      */
     Optional<Resolution> resolve(String serviceName);
+
+    /** Whether the service is known and live, so it may be sent new work. */
+    default boolean isLive(String serviceName) {
+        return resolve(serviceName).map(Resolution::live).orElse(false);
+    }
 }

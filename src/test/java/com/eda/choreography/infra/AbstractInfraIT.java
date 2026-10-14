@@ -61,6 +61,8 @@ public abstract class AbstractInfraIT {
         registry.add("spring.data.redis.port", () -> REDIS.getMappedPort(6379));
         // Short, so a test of an undo that keeps failing does not wait five minutes.
         registry.add("choreography.compensation.retry-for", () -> "2s");
+        // Short, so a test of a service that never appears does not wait half a minute.
+        registry.add("choreography.late-binding.wait", () -> "3s");
     }
 
     /**

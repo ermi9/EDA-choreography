@@ -4,6 +4,7 @@ import com.eda.choreography.domain.compensation.CompensationRequest;
 import com.eda.choreography.domain.compensation.CompensationRunner;
 import com.eda.choreography.domain.message.ChoreographyMessage;
 import com.eda.choreography.domain.step.JoinRunner;
+import com.eda.choreography.domain.step.NextHopUnavailableException;
 import com.eda.choreography.domain.step.StepRunner;
 import java.time.Duration;
 import java.util.Objects;
@@ -33,6 +34,12 @@ import org.springframework.util.backoff.FixedBackOff;
  * the failure and the instance is undone or the failure goes to the join. If even that cannot
  * be published, the record is delivered again.
  *
+ * <p>A step whose next service takes no work yet ({@link NextHopUnavailableException}) is tried
+ * again with a growing pause (half a second doubling up to five) for as long as the configured
+ * late-binding wait, since a late-bound service may still register. Then the runner gives up on
+ * that next step instead (see {@link StepRunner#failNextHop}). While it waits, the records
+ * behind it on its partition wait too, which is why the wait is kept short.
+ *
  * <p>A compensation that throws is retried for longer, with a growing pause (1 s doubling up to
  * 30 s), because most undo failures are passing outages. Once the configured time is spent the
  * request is parked for an operator (see {@link CompensationRunner#giveUp}) instead of blocking
@@ -47,24 +54,29 @@ public class StepContainerFactory {
     private final ConsumerFactory<String, ChoreographyMessage> messages;
     private final ConsumerFactory<String, CompensationRequest> requests;
     private final Duration compensationRetryFor;
+    private final Duration lateBindingWait;
 
     /**
      * @param compensationRetryFor how long a failing compensation is retried before it is parked
+     * @param lateBindingWait      how long a step waits for its next service to take work
      */
     public StepContainerFactory(
             ConsumerFactory<String, ChoreographyMessage> messages,
             ConsumerFactory<String, CompensationRequest> requests,
-            Duration compensationRetryFor) {
+            Duration compensationRetryFor,
+            Duration lateBindingWait) {
         this.messages = Objects.requireNonNull(messages, "messages");
         this.requests = Objects.requireNonNull(requests, "requests");
         this.compensationRetryFor = Objects.requireNonNull(compensationRetryFor, "compensationRetryFor");
+        this.lateBindingWait = Objects.requireNonNull(lateBindingWait, "lateBindingWait");
     }
 
     public ConcurrentMessageListenerContainer<String, ChoreographyMessage> create(StepRunner runner) {
         return messageContainer(
                 runner.stepId(),
                 record -> runner.handle(record.value()),
-                record -> runner.fail(record.value()));
+                record -> runner.fail(record.value()),
+                record -> runner.failNextHop(record.value()));
     }
 
     /**
@@ -72,7 +84,8 @@ public class StepContainerFactory {
      * so one consumer takes an instance's branches and its timeout strictly in turn.
      */
     public ConcurrentMessageListenerContainer<String, ChoreographyMessage> create(JoinRunner runner) {
-        return messageContainer(runner.stepId(), forJoin(runner, runner::handle), forJoin(runner, runner::fail));
+        return messageContainer(runner.stepId(), forJoin(runner, runner::handle), forJoin(runner, runner::fail),
+                forJoin(runner, runner::failNextHop));
     }
 
     private static Consumer<ConsumerRecord<String, ChoreographyMessage>> forJoin(
@@ -111,6 +124,22 @@ public class StepContainerFactory {
         return container;
     }
 
+    private static boolean waitsForNextHop(Throwable exception) {
+        for (var cause = exception; cause != null; cause = cause.getCause()) {
+            if (cause instanceof NextHopUnavailableException) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static ExponentialBackOff growingPauseUpTo5sFor(Duration total) {
+        var backOff = new ExponentialBackOff(500L, 2.0);
+        backOff.setMaxInterval(5_000L);
+        backOff.setMaxElapsedTime(total.toMillis());
+        return backOff;
+    }
+
     private static ExponentialBackOff growingPauseFor(Duration total) {
         var backOff = new ExponentialBackOff(1_000L, 2.0);
         backOff.setMaxInterval(30_000L);
@@ -121,7 +150,8 @@ public class StepContainerFactory {
     private ConcurrentMessageListenerContainer<String, ChoreographyMessage> messageContainer(
             String stepId,
             Consumer<ConsumerRecord<String, ChoreographyMessage>> handle,
-            Consumer<ConsumerRecord<String, ChoreographyMessage>> giveUp) {
+            Consumer<ConsumerRecord<String, ChoreographyMessage>> giveUp,
+            Consumer<ConsumerRecord<String, ChoreographyMessage>> giveUpOnNextHop) {
         var properties = new ContainerProperties(StepTopics.inputTopic(stepId));
         properties.setGroupId(stepId);
         properties.setAckMode(ContainerProperties.AckMode.RECORD);
@@ -129,9 +159,13 @@ public class StepContainerFactory {
 
         var container = new ConcurrentMessageListenerContainer<>(messages, properties);
         container.setBeanName("step-" + stepId);
-        container.setCommonErrorHandler(new DefaultErrorHandler(
-                (record, exception) -> giveUpOn(stepId, cast(record), exception, giveUp),
-                RETRY_TWICE_A_SECOND_APART));
+        var errorHandler = new DefaultErrorHandler(
+                (record, exception) -> giveUpOn(stepId, cast(record), exception,
+                        waitsForNextHop(exception) ? giveUpOnNextHop : giveUp),
+                RETRY_TWICE_A_SECOND_APART);
+        errorHandler.setBackOffFunction((record, exception) ->
+                waitsForNextHop(exception) ? growingPauseUpTo5sFor(lateBindingWait) : null);
+        container.setCommonErrorHandler(errorHandler);
         return container;
     }
 

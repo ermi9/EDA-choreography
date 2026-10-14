@@ -109,8 +109,9 @@ public class KafkaConfig {
     StepContainerFactory stepContainerFactory(
             ConsumerFactory<String, ChoreographyMessage> messages,
             ConsumerFactory<String, CompensationRequest> requests,
-            @Value("${choreography.compensation.retry-for}") Duration compensationRetryFor) {
-        return new StepContainerFactory(messages, requests, compensationRetryFor);
+            @Value("${choreography.compensation.retry-for}") Duration compensationRetryFor,
+            @Value("${choreography.late-binding.wait}") Duration lateBindingWait) {
+        return new StepContainerFactory(messages, requests, compensationRetryFor, lateBindingWait);
     }
 
     /**

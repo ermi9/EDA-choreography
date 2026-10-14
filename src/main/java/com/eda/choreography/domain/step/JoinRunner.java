@@ -98,6 +98,14 @@ public final class JoinRunner {
         arrive(branch, step::fail);
     }
 
+    /**
+     * Gives up waiting for the service after the join step, after the adapter waited as long as a
+     * late-bound service may take to appear (see {@link StepRunner#failNextHop}).
+     */
+    public void failNextHop(ChoreographyMessage branch) {
+        arrive(branch, step::failNextHop);
+    }
+
     private void arrive(ChoreographyMessage branch, Consumer<ChoreographyMessage> whenFired) {
         var branchId = lastEntryOf(branch).id();
         var key = new JoinKey(branch.correlationId(), stepId());
