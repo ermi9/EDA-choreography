@@ -65,7 +65,7 @@ public final class StepRunner {
      */
     public void fail(ChoreographyMessage incoming) {
         var failed = incoming.recordFailure(stepId);
-        var join = nextSteps.enclosingJoin(stepId);
+        var join = nextSteps.enclosingJoin(stepId, incoming);
         if (join.isPresent()) {
             publisher.publish(join.get(), failed);
             return;

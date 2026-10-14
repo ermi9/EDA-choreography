@@ -141,6 +141,28 @@ class StepRunnerTest {
     }
 
     @Test
+    void theJoinAFailureGoesToDependsOnTheFlowOfTheMessage() {
+        // One service can run a step in several flows, each forking and joining differently.
+        var perFlow = new NextSteps() {
+            @Override
+            public List<String> after(String stepId, ChoreographyMessage message) {
+                return List.of();
+            }
+
+            @Override
+            public Optional<String> enclosingJoin(String stepId, ChoreographyMessage message) {
+                return message.flowName().equals("returns") ? Optional.of("refund-join") : Optional.empty();
+            }
+        };
+        var incoming = ChoreographyMessage.start("order-42", "returns", Map.of()).recordStep("A", RESERVED);
+
+        new StepRunner("B", message -> PRICED, perFlow, publisher, trigger).fail(incoming);
+
+        assertThat(compensations.requests).isEmpty();
+        assertThat(publisher.sent).singleElement().satisfies(sent -> assertThat(sent.stepId()).isEqualTo("refund-join"));
+    }
+
+    @Test
     void rejectsABlankStepId() {
         assertThatThrownBy(() -> new StepRunner(" ", message -> Map.of(), FLOW, publisher, trigger))
                 .isInstanceOf(IllegalArgumentException.class);

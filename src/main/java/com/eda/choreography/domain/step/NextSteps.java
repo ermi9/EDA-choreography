@@ -22,4 +22,13 @@ public interface NextSteps {
     default Optional<String> enclosingJoin(String stepId) {
         return Optional.empty();
     }
+
+    /**
+     * The join that the branch running {@code stepId} ends at, in the flow the message runs. A
+     * service can run a step in several flows, so routing that serves more than one flow answers
+     * here. By default the answer does not depend on the flow.
+     */
+    default Optional<String> enclosingJoin(String stepId, ChoreographyMessage message) {
+        return enclosingJoin(stepId);
+    }
 }
