@@ -5,6 +5,7 @@ import com.eda.choreography.domain.compensation.CompensationRequest;
 import com.eda.choreography.domain.compensation.CompensationTrigger;
 import com.eda.choreography.domain.join.JoinTimeoutNotices;
 import com.eda.choreography.domain.message.ChoreographyMessage;
+import com.eda.choreography.domain.resolution.ResolutionSource;
 import com.eda.choreography.domain.step.MessagePublisher;
 import java.time.Duration;
 import java.util.Map;
@@ -64,8 +65,9 @@ public class KafkaConfig {
             KafkaTemplate<String, CompensationRequest> requests,
             KafkaTemplate<String, ChoreographyMessage> messages,
             @Value("${choreography.kafka.compensated-topic}") String compensatedTopic,
-            @Value("${choreography.kafka.compensation-failed-topic}") String failedTopic) {
-        return new KafkaCompensationPublisher(requests, messages, compensatedTopic, failedTopic);
+            @Value("${choreography.kafka.compensation-failed-topic}") String failedTopic,
+            ResolutionSource resolutions) {
+        return new KafkaCompensationPublisher(requests, messages, compensatedTopic, failedTopic, resolutions);
     }
 
     @Bean
@@ -76,13 +78,15 @@ public class KafkaConfig {
     @Bean
     MessagePublisher messagePublisher(
             KafkaTemplate<String, ChoreographyMessage> template,
-            @Value("${choreography.kafka.completed-topic}") String completedTopic) {
-        return new KafkaMessagePublisher(template, completedTopic);
+            @Value("${choreography.kafka.completed-topic}") String completedTopic,
+            ResolutionSource resolutions) {
+        return new KafkaMessagePublisher(template, completedTopic, resolutions);
     }
 
     @Bean
-    JoinTimeoutNotices joinTimeoutNotices(KafkaTemplate<String, ChoreographyMessage> template) {
-        return new KafkaJoinTimeoutNotices(template);
+    JoinTimeoutNotices joinTimeoutNotices(
+            KafkaTemplate<String, ChoreographyMessage> template, ResolutionSource resolutions) {
+        return new KafkaJoinTimeoutNotices(template, resolutions);
     }
 
     @Bean

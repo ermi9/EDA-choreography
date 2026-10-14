@@ -26,16 +26,17 @@ class KafkaCompensationPublisherTest {
             new KafkaTemplate<>(new MockProducerFactory<>(() -> requests)),
             new KafkaTemplate<>(new MockProducerFactory<>(() -> messages)),
             "choreography.compensated",
-            "choreography.compensation-failed");
+            "choreography.compensation-failed",
+            RenamedTopics.everyServiceLive());
 
     @Test
-    void sendsARequestToTheStepsCompensationTopicKeyedByCorrelationId() {
+    void sendsARequestToTheCompensationTopicDiscoveryGaveTheStepKeyedByCorrelationId() {
         var request = new CompensationRequest("run-1", failed.trace().get(0).id(), "run-1", failed);
 
         publisher.publish("A", request);
 
         assertThat(requests.history()).singleElement().satisfies(record -> {
-            assertThat(record.topic()).isEqualTo("A.compensate");
+            assertThat(record.topic()).isEqualTo("A.undo");
             assertThat(record.key()).isEqualTo("order-42");
             assertThat(record.value()).isEqualTo(request);
         });

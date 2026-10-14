@@ -16,12 +16,12 @@ class KafkaJoinTimeoutNoticesTest {
     @Test
     void sendsAnEmptyMarkedRecordToTheJoinKeyedLikeTheInstancesBranches() {
         var producer = new MockProducer<>(true, null, new StringSerializer(), MessageWireFormat.<ChoreographyMessage>serializer());
-        var notices = new KafkaJoinTimeoutNotices(new KafkaTemplate<>(new MockProducerFactory<>(() -> producer)));
+        var notices = new KafkaJoinTimeoutNotices(new KafkaTemplate<>(new MockProducerFactory<>(() -> producer)), RenamedTopics.everyServiceLive());
 
         notices.publish(new JoinKey("order-42", "J"));
 
         assertThat(producer.history()).singleElement().satisfies(record -> {
-            assertThat(record.topic()).isEqualTo("J.in");
+            assertThat(record.topic()).isEqualTo("J.work");
             assertThat(record.key()).isEqualTo("order-42");
             assertThat(record.value()).isNull();
             assertThat(KafkaJoinTimeoutNotices.isTimeoutNotice(record.headers())).isTrue();

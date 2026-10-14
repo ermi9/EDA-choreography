@@ -21,13 +21,13 @@ class KafkaMessagePublisherTest {
     private final ChoreographyMessage message = ChoreographyMessage.start("order-42", "checkout", Map.of()).recordStep("A", Map.of("quantity", 10));
 
     @Test
-    void sendsToTheNextStepsInputTopicKeyedByCorrelationId() {
+    void sendsToTheInputTopicDiscoveryGaveTheNextStepKeyedByCorrelationId() {
         var producer = autoCompletingProducer();
 
         publisherOn(producer).publish("B", message);
 
         assertThat(producer.history()).singleElement().satisfies(record -> {
-            assertThat(record.topic()).isEqualTo("B.in");
+            assertThat(record.topic()).isEqualTo("B.work");
             // One key per instance keeps an instance on one partition, in order.
             assertThat(record.key()).isEqualTo("order-42");
             assertThat(record.value()).isEqualTo(message);
@@ -53,7 +53,7 @@ class KafkaMessagePublisherTest {
 
         assertThatThrownBy(() -> publisherOn(producer).publish("B", message))
                 .isInstanceOf(KafkaException.class)
-                .hasMessageContaining("B.in")
+                .hasMessageContaining("B.work")
                 .hasRootCauseMessage("broker unreachable");
     }
 
@@ -72,6 +72,6 @@ class KafkaMessagePublisherTest {
     }
 
     private static KafkaMessagePublisher publisherOn(MockProducer<String, ChoreographyMessage> producer) {
-        return new KafkaMessagePublisher(new KafkaTemplate<>(new MockProducerFactory<>(() -> producer)), COMPLETED_TOPIC);
+        return new KafkaMessagePublisher(new KafkaTemplate<>(new MockProducerFactory<>(() -> producer)), COMPLETED_TOPIC, RenamedTopics.everyServiceLive());
     }
 }

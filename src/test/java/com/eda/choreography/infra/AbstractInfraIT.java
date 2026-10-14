@@ -1,11 +1,17 @@
 package com.eda.choreography.infra;
 
+import static org.awaitility.Awaitility.await;
+
+import com.eda.choreography.domain.resolution.Resolution;
+import com.eda.choreography.domain.resolution.ServiceTable;
+import java.time.Duration;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import org.apache.kafka.clients.admin.Admin;
 import org.apache.kafka.clients.admin.AdminClientConfig;
 import org.apache.kafka.clients.admin.NewTopic;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -44,6 +50,10 @@ public abstract class AbstractInfraIT {
         DISCOVERY = new FakeDiscovery(KAFKA.getBootstrapServers());
     }
 
+    /** The engine's own table of services, fed from {@code service-events}. */
+    @Autowired
+    protected ServiceTable serviceTable;
+
     @DynamicPropertySource
     static void containerProperties(DynamicPropertyRegistry registry) {
         registry.add("spring.kafka.bootstrap-servers", KAFKA::getBootstrapServers);
@@ -67,6 +77,18 @@ public abstract class AbstractInfraIT {
                     .map(topic -> new NewTopic(topic, PARTITIONS, (short) 1))
                     .toList();
             admin.createTopics(newTopics).all().get();
+        }
+    }
+
+    /**
+     * Has discovery register the services and report them healthy, and waits until the engine
+     * resolves each one, so a step can be sent to it.
+     */
+    protected void registerWithDiscovery(String... services) {
+        DISCOVERY.registerHealthy(services);
+        for (var service : services) {
+            await().atMost(Duration.ofSeconds(30))
+                    .until(() -> serviceTable.resolve(service).filter(Resolution::live).isPresent());
         }
     }
 

@@ -90,7 +90,10 @@ abstract class AbstractFlowIT extends AbstractInfraIT {
         return "order-" + UUID.randomUUID();
     }
 
-    /** Creates the input and compensation topics of the given steps, and the shared outcome topics. */
+    /**
+     * Creates the input and compensation topics of the given steps and the shared outcome topics,
+     * and has discovery register the steps' services, so they resolve.
+     */
     void createTopicsFor(String... steps) throws Exception {
         var topics = new ArrayList<String>(List.of(completedTopic, compensatedTopic, compensationFailedTopic));
         for (var step : steps) {
@@ -98,6 +101,7 @@ abstract class AbstractFlowIT extends AbstractInfraIT {
             topics.add(StepTopics.compensationTopic(step));
         }
         createTopics(topics.toArray(String[]::new));
+        registerWithDiscovery(steps);
     }
 
     /** Starts a step together with the compensator that undoes it. */

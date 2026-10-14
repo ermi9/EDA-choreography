@@ -3,13 +3,14 @@ package com.eda.choreography.infra.kafka;
 import com.eda.choreography.domain.join.JoinKey;
 import com.eda.choreography.domain.join.JoinTimeoutNotices;
 import com.eda.choreography.domain.message.ChoreographyMessage;
+import com.eda.choreography.domain.resolution.ResolutionSource;
 import java.util.Objects;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.header.Headers;
 import org.springframework.kafka.core.KafkaTemplate;
 
 /**
- * Sends a join's timeout notice to the join's own input topic, keyed by correlation id like the
+ * Sends a join's timeout notice to the join's own input topic, as discovery resolves it, keyed by correlation id like the
  * instance's branches. It therefore lands on the same partition as those branches, and the one
  * consumer of that partition handles notice and branches strictly in turn: Kafka's ordering is
  * the concurrency control, so timing a join out needs no lock.
@@ -22,15 +23,17 @@ public class KafkaJoinTimeoutNotices implements JoinTimeoutNotices {
     static final String HEADER = "choreography-join-timeout";
 
     private final KafkaTemplate<String, ChoreographyMessage> template;
+    private final Destinations destinations;
 
-    public KafkaJoinTimeoutNotices(KafkaTemplate<String, ChoreographyMessage> template) {
+    public KafkaJoinTimeoutNotices(KafkaTemplate<String, ChoreographyMessage> template, ResolutionSource resolutions) {
         this.template = Objects.requireNonNull(template, "template");
+        this.destinations = new Destinations(resolutions);
     }
 
     @Override
     public void publish(JoinKey key) {
         var record = new ProducerRecord<String, ChoreographyMessage>(
-                StepTopics.inputTopic(key.joinId()), key.correlationId(), null);
+                destinations.timeoutNoticeFor(key.joinId()), key.correlationId(), null);
         record.headers().add(HEADER, new byte[0]);
         BlockingSend.send(template, record);
     }

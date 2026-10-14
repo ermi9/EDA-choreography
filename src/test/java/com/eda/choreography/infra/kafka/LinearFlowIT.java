@@ -66,6 +66,7 @@ class LinearFlowIT extends AbstractInfraIT {
     @Test
     void aLinearFlowRunsEndToEndAndArrivesWithTheAccumulatedResult() throws Exception {
         createTopics("reserve.in", "price.in", "tax.in", completedTopic);
+        registerWithDiscovery("reserve", "price", "tax");
         for (var step : CHECKOUT.steps()) {
             startStep(new StepRunner(step, ACTIONS.get(step), CHECKOUT, publisher, compensations));
         }

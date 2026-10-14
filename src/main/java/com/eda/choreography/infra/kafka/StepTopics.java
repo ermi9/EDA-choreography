@@ -1,9 +1,10 @@
 package com.eda.choreography.infra.kafka;
 
 /**
- * Where a step listens. Follows discovery's {@code <name>.in} and {@code <name>.compensate}
- * conventions directly, because there is no discovery yet. INC-5 resolves names through a
- * {@code ResolutionSource} instead.
+ * Where a service listens for its own work: discovery derives a service's topics from its name
+ * as {@code <name>.in} and {@code <name>.compensate}, and a service subscribes before it has
+ * registered. Every other service reaches it through discovery's table instead (see
+ * {@link Destinations}), never through this convention.
  */
 final class StepTopics {
 
