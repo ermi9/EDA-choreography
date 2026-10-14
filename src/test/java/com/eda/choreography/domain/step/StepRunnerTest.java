@@ -206,6 +206,61 @@ class StepRunnerTest {
     }
 
     @Test
+    void aStepWhoseNextServiceTakesNoWorkPublishesNothingAndSaysWhichServiceItWaitsFor() {
+        var runner = new StepRunner("B", message -> PRICED, FLOW, publisher, trigger, service -> !service.equals("C"));
+        var incoming = ChoreographyMessage.start("order-42", "checkout", Map.of()).recordStep("A", RESERVED);
+
+        assertThatThrownBy(() -> runner.handle(incoming))
+                .isInstanceOf(NextHopUnavailableException.class)
+                .hasMessageContaining("C");
+        assertThat(publisher.sent).isEmpty();
+        assertThat(publisher.completed).isEmpty();
+    }
+
+    @Test
+    void whenTheNextServiceNeverComesTheStepCountsAsDoneAndTheNextOneAsFailedSoTheStepIsUndone() {
+        var runner = new StepRunner("B", message -> PRICED, FLOW, publisher, trigger, service -> !service.equals("C"));
+        var incoming = ChoreographyMessage.start("order-42", "checkout", Map.of()).recordStep("A", RESERVED);
+
+        runner.failNextHop(incoming);
+
+        var failed = incoming.recordStep("B", PRICED).recordFailure("C");
+        var failure = failed.trace().get(2);
+        assertThat(publisher.sent).isEmpty();
+        // B committed its work, so it is the first thing undone.
+        assertThat(compensations.requests).singleElement().satisfies(sent -> {
+            assertThat(sent.stepId()).isEqualTo("B");
+            assertThat(sent.request()).isEqualTo(
+                    new CompensationRequest(failure.id(), failed.trace().get(1).id(), failure.id(), failed));
+        });
+    }
+
+    @Test
+    void whenOneBranchOfAForkNeverGetsItsServiceTheOthersGoOnAndTheJoinHearsOfTheFailure() {
+        var fork = new NextSteps() {
+            @Override
+            public List<String> after(String stepId, ChoreographyMessage message) {
+                return stepId.equals("A") ? List.of("B", "C") : List.of("J");
+            }
+
+            @Override
+            public Optional<String> enclosingJoin(String stepId) {
+                return stepId.equals("B") || stepId.equals("C") ? Optional.of("J") : Optional.empty();
+            }
+        };
+        var runner = new StepRunner("A", message -> RESERVED, fork, publisher, trigger, service -> !service.equals("C"));
+        var start = ChoreographyMessage.start("order-42", "checkout", Map.of());
+
+        runner.failNextHop(start);
+
+        var reserved = start.recordStep("A", RESERVED);
+        assertThat(compensations.requests).isEmpty();
+        assertThat(publisher.sent).extracting(RecordingPublisher.Sent::stepId).containsExactly("B", "J");
+        assertThat(publisher.sent.get(0).message()).isEqualTo(reserved.addressedTo("B"));
+        assertThat(publisher.sent.get(1).message()).isEqualTo(reserved.recordFailure("C").addressedTo("J"));
+    }
+
+    @Test
     void rejectsABlankStepId() {
         assertThatThrownBy(() -> new StepRunner(" ", message -> Map.of(), FLOW, publisher, trigger))
                 .isInstanceOf(IllegalArgumentException.class);
