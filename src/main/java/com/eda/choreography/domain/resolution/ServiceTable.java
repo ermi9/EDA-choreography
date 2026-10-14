@@ -9,12 +9,21 @@ import java.util.concurrent.ConcurrentHashMap;
  * from the start. A service resolves to the topics on its latest event, and is live only while
  * its status is {@code healthy}: discovery's contract allows sending work on that value alone.
  *
+ * <p>Status changes are fenced by generation, as the contract asks. Kafka delivers at least
+ * once and discovery's partition leadership can move, so a status change from a deposed leader
+ * can arrive after a newer one; one below the highest generation seen for the service is
+ * dropped. A registration starts a new lifecycle and resets the fence.
+ *
+ * <p>A deregistered service stays in the table, not live, so the steps it ran can still be
+ * undone through its compensation topic. Discovery deleted it, so only a new registration
+ * brings it back; a status change after the deregistration is a late one from before.
+ *
  * <p>One consumer thread applies events while any number of steps resolve names, so entries are
  * replaced whole and never changed in place.
  */
 public final class ServiceTable implements ResolutionSource {
 
-    private final Map<String, Resolution> services = new ConcurrentHashMap<>();
+    private final Map<String, Entry> services = new ConcurrentHashMap<>();
 
     /** Applies one event. An event this table cannot use (an unknown type, a missing field) is ignored. */
     public void apply(ServiceEvent event) {
@@ -22,9 +31,12 @@ public final class ServiceTable implements ResolutionSource {
             return;
         }
         switch (event.type()) {
-            case ServiceEvent.REGISTERED, ServiceEvent.STATUS_CHANGED -> services.put(
-                    event.serviceName(),
-                    new Resolution(event.inputTopic(), event.compensationTopic(), ServiceEvent.HEALTHY.equals(event.status())));
+            case ServiceEvent.REGISTERED -> services.put(event.serviceName(), Entry.of(event, false));
+            case ServiceEvent.DEREGISTERED -> services.put(event.serviceName(), Entry.of(event, true));
+            case ServiceEvent.STATUS_CHANGED -> services.compute(event.serviceName(), (name, known) ->
+                    known == null || (!known.deregistered && event.generation() >= known.generation)
+                            ? Entry.of(event, false)
+                            : known);
             default -> {
             }
         }
@@ -32,7 +44,7 @@ public final class ServiceTable implements ResolutionSource {
 
     @Override
     public Optional<Resolution> resolve(String serviceName) {
-        return Optional.ofNullable(services.get(serviceName));
+        return Optional.ofNullable(services.get(serviceName)).map(Entry::resolution);
     }
 
     private static boolean usable(ServiceEvent event) {
@@ -45,5 +57,16 @@ public final class ServiceTable implements ResolutionSource {
 
     private static boolean hasText(String value) {
         return value != null && !value.isBlank();
+    }
+
+    private record Entry(Resolution resolution, long generation, boolean deregistered) {
+
+        static Entry of(ServiceEvent event, boolean deregistered) {
+            var live = !deregistered && ServiceEvent.HEALTHY.equals(event.status());
+            return new Entry(
+                    new Resolution(event.inputTopic(), event.compensationTopic(), live),
+                    event.generation(),
+                    deregistered);
+        }
     }
 }
