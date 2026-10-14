@@ -5,6 +5,7 @@ import com.eda.choreography.domain.plan.PlanNode.Split;
 import java.time.Duration;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -55,7 +56,12 @@ public final class PlanModel {
         nodes.values().forEach(this::checkSplit);
         this.enclosingJoins = new HashMap<>();
         this.expectedBranches = new HashMap<>();
-        nodes.values().stream().filter(node -> node.split() == Split.PARALLEL).forEach(this::closeFork);
+        var forks = nodes.values().stream().filter(node -> node.split() == Split.PARALLEL).toList();
+        // Every fork is walked before any is closed, so a nested fork is reported as such
+        // whichever fork comes first.
+        var branches = new LinkedHashMap<PlanNode, Set<String>>();
+        forks.forEach(fork -> branches.put(fork, walkBranches(fork)));
+        branches.forEach(this::closeFork);
         nodes.values().stream()
                 .filter(node -> node.kind() == Kind.JOIN && !expectedBranches.containsKey(node.id()))
                 .findFirst()
@@ -119,11 +125,11 @@ public final class PlanModel {
                 throw invalid("step " + node.id() + " appears twice");
             }
         }
-        return Map.copyOf(index);
+        return Collections.unmodifiableMap(index);
     }
 
     private Map<String, List<PlanEdge>> indexEdges(List<PlanEdge> drawn) {
-        var index = new HashMap<String, List<PlanEdge>>();
+        var index = new LinkedHashMap<String, List<PlanEdge>>();
         var seen = new HashSet<List<String>>();
         for (var edge : drawn) {
             for (var end : List.of(edge.from(), edge.to())) {
@@ -137,7 +143,7 @@ public final class PlanModel {
             index.computeIfAbsent(edge.from(), from -> new ArrayList<>()).add(edge);
         }
         index.replaceAll((from, edges) -> List.copyOf(edges));
-        return Map.copyOf(index);
+        return Collections.unmodifiableMap(index);
     }
 
     private String findStart(List<PlanEdge> drawn) {
@@ -213,11 +219,8 @@ public final class PlanModel {
         }
     }
 
-    /**
-     * Walks every branch of a fork up to the join they meet at, and records that join for each
-     * step on the way.
-     */
-    private void closeFork(PlanNode fork) {
+    /** The steps on the branches of a fork, up to and not including the one join they meet at. */
+    private Set<String> walkBranches(PlanNode fork) {
         var branch = new LinkedHashSet<String>();
         var joins = new LinkedHashSet<String>();
         var pending = new ArrayDeque<String>();
@@ -250,7 +253,20 @@ public final class PlanModel {
         if (joins.size() != 1) {
             throw invalid("the branches of fork " + fork.id() + " must meet at one join, but meet at " + joins);
         }
-        var join = joins.iterator().next();
+        return branch;
+    }
+
+    /**
+     * Checks that nothing outside a fork enters its branches or its join, and records the join
+     * for each step on the branches.
+     */
+    private void closeFork(PlanNode fork, Set<String> branch) {
+        var join = outgoing.values().stream()
+                .flatMap(List::stream)
+                .filter(edge -> branch.contains(edge.from()) && nodes.get(edge.to()).kind() == Kind.JOIN)
+                .map(PlanEdge::to)
+                .findFirst()
+                .orElseThrow();
         var inside = new HashSet<>(branch);
         inside.add(fork.id());
         for (var edges : outgoing.values()) {
