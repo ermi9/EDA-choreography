@@ -140,6 +140,46 @@ class PlannedFlowIT extends AbstractFlowIT {
         }
     }
 
+    @Test
+    void oneServiceRunsTwoStepsOfAFlowAndUndoesBothWhenALaterStepFails() throws Exception {
+        var reserve = unique("reserve");
+        var notify = unique("notify");
+        var charge = unique("charge");
+        var close = unique("close");
+        createTopicsFor(reserve, notify, charge, close);
+        var plan = PlanModel.builder("checkout")
+                .task(reserve)
+                .task("notify-buyer", notify, Split.NONE)
+                .task(charge)
+                .task("notify-seller", notify, Split.NONE)
+                .task(close)
+                .edge(reserve, "notify-buyer")
+                .edge("notify-buyer", charge)
+                .edge(charge, "notify-seller")
+                .edge("notify-seller", close)
+                .build();
+        var routes = new PlannedRoutes(Plans.of(plan), conditions);
+        startStep(reserve, message -> Map.of("quantity", 10), routes);
+        startStep(notify, message -> Map.of("told", message.step()), routes);
+        startStep(charge, message -> Map.of("amount", 30), routes);
+        startStep(close, message -> {
+            throw new IllegalStateException("ledger closed");
+        }, routes);
+        var correlationId = newInstance();
+
+        try (var outcomes = outcomes()) {
+            publisher.publish(reserve, ChoreographyMessage.start(correlationId, "checkout", Map.of()));
+
+            var compensated = await(outcomes, compensatedTopic, correlationId, WAIT);
+
+            assertThat(compensated.resultOf("notify-buyer")).contains(Map.of("told", "notify-buyer"));
+            assertThat(compensated.resultOf("notify-seller")).contains(Map.of("told", "notify-seller"));
+            assertThat(compensated.trace()).filteredOn(entry -> entry.stepId().startsWith("notify-"))
+                    .extracting(TraceEntry::service).containsOnly(notify);
+            assertThat(undone).containsExactly("notify-seller", charge, "notify-buyer", reserve);
+        }
+    }
+
     /** reserve, then pay and ship in parallel, joined at confirm, then notify. */
     private static PlanModel checkout(String reserve, String pay, String ship, String confirm, String notify) {
         return PlanModel.builder("checkout")

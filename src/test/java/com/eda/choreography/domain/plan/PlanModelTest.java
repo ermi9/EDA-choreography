@@ -165,6 +165,21 @@ class PlanModelTest {
                 .edge("b1", "j").edge("b2", "j").edge("c", "j"), "step b forks inside fork a");
     }
 
+    @Test
+    void aServiceMayRunSeveralStepsOfAFlow() {
+        var plan = PlanModel.builder("checkout")
+                .task("notify-buyer", "notify", Split.NONE)
+                .task("charge")
+                .task("notify-seller", "notify", Split.NONE)
+                .edge("notify-buyer", "charge")
+                .edge("charge", "notify-seller")
+                .build();
+
+        assertThat(plan.serviceOf("notify-buyer")).isEqualTo("notify");
+        assertThat(plan.serviceOf("notify-seller")).isEqualTo("notify");
+        assertThat(plan.serviceOf("charge")).isEqualTo("charge");
+    }
+
     private static void assertRejected(PlanModel.Builder plan, String mentioning) {
         assertThatThrownBy(plan::build).isInstanceOf(InvalidPlanException.class).hasMessageContaining(mentioning);
     }

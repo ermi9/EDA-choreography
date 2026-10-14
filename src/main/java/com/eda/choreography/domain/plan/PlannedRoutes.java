@@ -53,6 +53,11 @@ public final class PlannedRoutes implements NextSteps {
         return planOf(message).enclosingJoin(stepId);
     }
 
+    @Override
+    public String serviceOf(String stepId, ChoreographyMessage message) {
+        return planOf(message).serviceOf(stepId);
+    }
+
     /** Planned routing differs by flow, so it cannot answer without the message. */
     @Override
     public Optional<String> enclosingJoin(String stepId) {

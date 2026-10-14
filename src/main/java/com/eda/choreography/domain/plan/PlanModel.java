@@ -31,6 +31,10 @@ import java.util.Set;
  * </ul>
  * Choices may sit anywhere, inside a branch too, and may come back together at a plain step.
  *
+ * <p>A step names the service that runs it, and one service may run several steps. A join is
+ * the exception: it is named after its service, because its state and its timeout notice are
+ * addressed by that name.
+ *
  * <p>A join waits for one branch per edge leaving its fork. A branch whose choice can reach the
  * join along two edges still arrives once.
  */
@@ -85,6 +89,15 @@ public final class PlanModel {
     /** The step every instance starts at. */
     public String start() {
         return start;
+    }
+
+    /** The service that runs a step. */
+    public String serviceOf(String stepId) {
+        var node = nodes.get(stepId);
+        if (node == null) {
+            throw new IllegalArgumentException(stepId + " is not a step of flow " + flowName);
+        }
+        return node.service();
     }
 
     public Optional<PlanNode> node(String stepId) {
@@ -305,7 +318,12 @@ public final class PlanModel {
         }
 
         public Builder task(String id, Split split) {
-            nodes.add(new PlanNode(id, Kind.TASK, split));
+            return task(id, id, split);
+        }
+
+        /** A step run by a service it is not named after, such as the second step of one service. */
+        public Builder task(String id, String service, Split split) {
+            nodes.add(new PlanNode(id, service, Kind.TASK, split));
             return this;
         }
 
@@ -315,7 +333,7 @@ public final class PlanModel {
 
         /** A join that, once it has run, leaves along a choice (a join cannot fork again: no nesting). */
         public Builder join(String id, Split split) {
-            nodes.add(new PlanNode(id, Kind.JOIN, split));
+            nodes.add(new PlanNode(id, id, Kind.JOIN, split));
             return this;
         }
 

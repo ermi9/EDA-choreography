@@ -126,6 +126,18 @@ class PlannedRoutesTest {
         assertThat(routes.enclosingJoin("review", start("loan"))).isEmpty();
     }
 
+    @Test
+    void namesTheServiceOfEachStepOfTheMessagesFlow() {
+        var twice = PlanModel.builder("notify-twice")
+                .task("notify-buyer", "notify", Split.NONE)
+                .task("notify-seller", "notify", Split.NONE)
+                .edge("notify-buyer", "notify-seller")
+                .build();
+        var routes = new PlannedRoutes(Plans.of(twice), FIELD_EQUALS);
+
+        assertThat(routes.serviceOf("notify-seller", start("notify-twice"))).isEqualTo("notify");
+    }
+
     private static ChoreographyMessage start(String flow) {
         return ChoreographyMessage.start("order-42", flow, Map.of());
     }
