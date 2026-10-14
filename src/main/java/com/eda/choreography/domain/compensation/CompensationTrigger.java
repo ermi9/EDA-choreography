@@ -37,7 +37,7 @@ public final class CompensationTrigger {
             return;
         }
         for (var entry : order.stages().get(0)) {
-            publisher.publish(entry.stepId(), new CompensationRequest(runId, entry.id(), runId, instance, alreadyUndone));
+            publisher.publish(entry.service(), new CompensationRequest(runId, entry.id(), runId, instance, alreadyUndone));
         }
     }
 }

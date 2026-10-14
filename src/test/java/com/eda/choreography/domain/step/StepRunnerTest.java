@@ -32,7 +32,7 @@ class StepRunnerTest {
         assertThat(publisher.completed).isEmpty();
         assertThat(publisher.sent).singleElement().satisfies(sent -> {
             assertThat(sent.stepId()).isEqualTo("C");
-            assertThat(sent.message()).isEqualTo(incoming.recordStep("B", PRICED));
+            assertThat(sent.message()).isEqualTo(incoming.recordStep("B", PRICED).addressedTo("C"));
         });
     }
 
@@ -69,8 +69,9 @@ class StepRunnerTest {
         runner.handle(ChoreographyMessage.start("order-42", "checkout", Map.of()));
 
         assertThat(publisher.sent).extracting(RecordingPublisher.Sent::stepId).containsExactly("B", "C");
-        assertThat(publisher.sent).extracting(RecordingPublisher.Sent::message).containsOnly(
-                ChoreographyMessage.start("order-42", "checkout", Map.of()).recordStep("A", RESERVED));
+        var reserved = ChoreographyMessage.start("order-42", "checkout", Map.of()).recordStep("A", RESERVED);
+        assertThat(publisher.sent).extracting(RecordingPublisher.Sent::message)
+                .containsExactly(reserved.addressedTo("B"), reserved.addressedTo("C"));
     }
 
     @Test
@@ -136,7 +137,7 @@ class StepRunnerTest {
         assertThat(compensations.compensated).isEmpty();
         assertThat(publisher.sent).singleElement().satisfies(sent -> {
             assertThat(sent.stepId()).isEqualTo("join");
-            assertThat(sent.message()).isEqualTo(incoming.recordFailure("B"));
+            assertThat(sent.message()).isEqualTo(incoming.recordFailure("B").addressedTo("join"));
         });
     }
 
@@ -160,6 +161,48 @@ class StepRunnerTest {
 
         assertThat(compensations.requests).isEmpty();
         assertThat(publisher.sent).singleElement().satisfies(sent -> assertThat(sent.stepId()).isEqualTo("refund-join"));
+    }
+
+    @Test
+    void aServiceRunsTheStepTheMessageIsAddressedToAndHandsOnToTheServiceOfTheNextStep() {
+        // "notify" runs two steps of the flow: telling the buyer, then telling the seller.
+        var twice = new NextSteps() {
+            @Override
+            public List<String> after(String stepId, ChoreographyMessage message) {
+                return stepId.equals("notify-buyer") ? List.of("notify-seller") : List.of();
+            }
+
+            @Override
+            public String serviceOf(String stepId, ChoreographyMessage message) {
+                return stepId.startsWith("notify-") ? "notify" : stepId;
+            }
+        };
+        var incoming = ChoreographyMessage.start("order-42", "checkout", Map.of())
+                .recordStep("A", RESERVED)
+                .addressedTo("notify-buyer");
+
+        new StepRunner("notify", message -> Map.of("to", message.step()), twice, publisher, trigger).handle(incoming);
+
+        assertThat(publisher.sent).singleElement().satisfies(sent -> {
+            assertThat(sent.stepId()).isEqualTo("notify");
+            assertThat(sent.message().step()).isEqualTo("notify-seller");
+            var ran = sent.message().trace().get(1);
+            assertThat(ran.stepId()).isEqualTo("notify-buyer");
+            assertThat(ran.service()).isEqualTo("notify");
+            assertThat(sent.message().results().get(ran.resultRef())).isEqualTo(Map.of("to", "notify-buyer"));
+        });
+    }
+
+    @Test
+    void undoingAStepGoesToTheServiceThatRanIt() {
+        var incoming = ChoreographyMessage.start("order-42", "checkout", Map.of())
+                .recordStep("reserve", "stock", RESERVED)
+                .addressedTo("price");
+
+        new StepRunner("pricing", message -> PRICED, FLOW, publisher, trigger).fail(incoming);
+
+        assertThat(compensations.requests).singleElement()
+                .satisfies(sent -> assertThat(sent.stepId()).isEqualTo("stock"));
     }
 
     @Test

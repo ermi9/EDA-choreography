@@ -47,7 +47,7 @@ class JoinRunnerTest {
         var merged = ChoreographyMessage.merge(List.of(FROM_B, FROM_C));
         assertThat(publisher.sent).singleElement().satisfies(sent -> {
             assertThat(sent.stepId()).isEqualTo("D");
-            assertThat(sent.message()).isEqualTo(merged.recordStep("J", JOINED));
+            assertThat(sent.message()).isEqualTo(merged.recordStep("J", JOINED).addressedTo("D"));
         });
         assertThat(compensations.requests).isEmpty();
     }

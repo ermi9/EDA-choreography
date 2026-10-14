@@ -31,4 +31,12 @@ public interface NextSteps {
     default Optional<String> enclosingJoin(String stepId, ChoreographyMessage message) {
         return enclosingJoin(stepId);
     }
+
+    /**
+     * The service that runs a step of the message's flow. By default a step is named after its
+     * service.
+     */
+    default String serviceOf(String stepId, ChoreographyMessage message) {
+        return stepId;
+    }
 }
