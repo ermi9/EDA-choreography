@@ -91,6 +91,13 @@ public final class PlanModel {
         return start;
     }
 
+    /** The services the plan's steps run on, in drawn order, each once. */
+    public Set<String> services() {
+        var services = new LinkedHashSet<String>();
+        nodes.values().forEach(node -> services.add(node.service()));
+        return Collections.unmodifiableSet(services);
+    }
+
     /** The service that runs a step. */
     public String serviceOf(String stepId) {
         var node = nodes.get(stepId);
