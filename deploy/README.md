@@ -81,3 +81,27 @@ attached.
 docker compose logs -f services-a services-b   # steps, joins and "demo: … undoes …"
 docker compose logs -f discovery               # registrations and health checks
 ```
+
+## Where it runs now (Azure)
+
+The live stack runs on an Azure for Students subscription, set up with the Azure CLI:
+
+- **Resources:** resource group `choreography-rg`, VM `choreography-vm`, size
+  **Standard_B2as_v2** (2 vCPU, 8 GB), Ubuntu 24.04, region **austriaeast**, static IP
+  `choreography-ip`.
+- **Firewall:** NSG `choreography-nsg` allows 22 from the owner's IP only, and 80 from anywhere.
+- **Why that region and size:** the subscription may only deploy in five EU regions, and has
+  no quota for the newest D-series. B-series v2 is allowed.
+- **Why the network was created separately:** `az vm create` alone was rejected with a bare
+  400 (the CLI crashed while reporting it). So the network, NSG, IP and NIC were created first,
+  and the VM through the REST API.
+
+Stop billing for compute while idle, and start again before a demo. The IP is static, so it
+stays the same:
+
+```sh
+az vm deallocate -g choreography-rg -n choreography-vm
+az vm start -g choreography-rg -n choreography-vm
+```
+
+Remove everything: `az group delete -n choreography-rg`.
