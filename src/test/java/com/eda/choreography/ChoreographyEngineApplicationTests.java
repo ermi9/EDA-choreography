@@ -18,7 +18,7 @@ import org.springframework.boot.test.context.SpringBootTest;
  * stream, which would reach for the broker.
  */
 @SpringBootTest(properties = {"choreography.join.sweep-enabled=false", "choreography.discovery.listen-enabled=false",
-        "choreography.flows.load-folder=false"})
+        "choreography.flows.load-folder=false", "choreography.runs.listen-enabled=false"})
 class ChoreographyEngineApplicationTests {
 
     @Autowired

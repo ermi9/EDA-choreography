@@ -54,6 +54,11 @@
 			<artifactId>spring-boot-starter-data-redis</artifactId>
 		</dependency>
 
+		<!-- The authoring API, the editor page and each hosted service's health endpoint. -->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-webmvc</artifactId>
+		</dependency>
 		<!-- Reads drawn .bpmn files into plans: the standalone model library, not the Camunda engine. -->
 		<dependency>
 			<groupId>org.camunda.bpm.model</groupId>
