@@ -5,12 +5,16 @@ import com.eda.choreography.domain.plan.PlanModel;
 import com.eda.choreography.domain.plan.PlanNode.Split;
 import com.eda.choreography.domain.plan.Planner;
 import java.io.ByteArrayInputStream;
+import java.time.Duration;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.regex.Pattern;
 import org.camunda.bpm.model.bpmn.Bpmn;
 import org.camunda.bpm.model.bpmn.BpmnModelInstance;
@@ -20,6 +24,7 @@ import org.camunda.bpm.model.bpmn.instance.EndEvent;
 import org.camunda.bpm.model.bpmn.instance.ExclusiveGateway;
 import org.camunda.bpm.model.bpmn.instance.FlowElement;
 import org.camunda.bpm.model.bpmn.instance.FlowNode;
+import org.camunda.bpm.model.bpmn.instance.ParallelGateway;
 import org.camunda.bpm.model.bpmn.instance.Process;
 import org.camunda.bpm.model.bpmn.instance.SequenceFlow;
 import org.camunda.bpm.model.bpmn.instance.StartEvent;
@@ -40,6 +45,12 @@ import org.camunda.bpm.model.xml.ModelException;
  *       condition, passed through as written (it is evaluated at runtime, on the task's result),
  *       except the gateway's default flow. An exclusive gateway with one outgoing flow only merges
  *       paths, and is passed through;</li>
+ *   <li>a parallel gateway after a task makes that task a fork, each outgoing flow a branch. A
+ *       parallel gateway where the branches meet must lead straight to a task: that task is the
+ *       join step, which runs once every branch has arrived. A join step is named after its
+ *       service, so its service runs no other task of the flow;</li>
+ *   <li>the process attribute {@code choreo:joinTimeout}, an ISO-8601 duration such as
+ *       {@code PT30S}, is how long the flow's joins wait for their last branch;</li>
  *   <li>compensation tasks and the boundary events that point at them are left out: a step is
  *       undone by its own service, through the compensation topic discovery gave it.</li>
  * </ul>
@@ -85,6 +96,7 @@ public final class BpmnPlanner implements Planner<BpmnFlow> {
         private final Map<Task, String> stepIds = new HashMap<>();
         private final Map<Task, Split> splits = new LinkedHashMap<>();
         private final List<String[]> edges = new ArrayList<>();
+        private final Set<Task> joins = new HashSet<>();
         private StartEvent start;
 
         Translation(String flowName, Process process) {
@@ -100,8 +112,17 @@ public final class BpmnPlanner implements Planner<BpmnFlow> {
             }
             var plan = PlanModel.builder(flowName);
             for (var task : tasks) {
-                plan.task(stepIds.get(task), serviceOf(task), splits.getOrDefault(task, Split.NONE));
+                var split = splits.getOrDefault(task, Split.NONE);
+                if (!joins.contains(task)) {
+                    plan.task(stepIds.get(task), serviceOf(task), split);
+                } else if (stepIds.get(task).equals(serviceOf(task))) {
+                    plan.join(stepIds.get(task), split);
+                } else {
+                    throw invalid("task " + task.getId() + " joins branches, so its service " + serviceOf(task)
+                            + " may run no other task of the flow");
+                }
             }
+            joinTimeout().ifPresent(plan::joinTimeout);
             for (var edge : edges) {
                 switch (edge[2]) {
                     case "plain" -> plan.edge(edge[0], edge[1]);
@@ -131,6 +152,7 @@ public final class BpmnPlanner implements Planner<BpmnFlow> {
                 } else if (!(element instanceof SequenceFlow
                         || element instanceof EndEvent
                         || element instanceof ExclusiveGateway
+                        || element instanceof ParallelGateway
                         || isCompensationBoundary(element))) {
                     throw invalid(describe(element) + " is not supported");
                 }
@@ -177,6 +199,10 @@ public final class BpmnPlanner implements Planner<BpmnFlow> {
                 choose(task, choice);
                 return;
             }
+            if (next instanceof ParallelGateway fork && fork.getOutgoing().size() > 1) {
+                fork(task, fork);
+                return;
+            }
             reach(next).ifPresent(target -> edges.add(new String[] {stepIds.get(task), target, "plain", null}));
         }
 
@@ -201,6 +227,30 @@ public final class BpmnPlanner implements Planner<BpmnFlow> {
             }
         }
 
+        private void fork(Task task, ParallelGateway fork) {
+            if (fork.getIncoming().size() != 1) {
+                throw invalid("parallel gateway " + fork.getId() + " both joins and forks; draw two gateways");
+            }
+            splits.put(task, Split.PARALLEL);
+            for (var flow : fork.getOutgoing()) {
+                var target = reach(flow.getTarget()).orElseThrow(() -> invalid(
+                        "the branch " + flow.getId() + " of fork " + fork.getId() + " ends the flow without meeting the others"));
+                edges.add(new String[] {stepIds.get(task), target, "plain", null});
+            }
+        }
+
+        private Optional<Duration> joinTimeout() {
+            var timeout = process.getAttributeValueNs(NAMESPACE, "joinTimeout");
+            if (timeout == null || timeout.isBlank()) {
+                return Optional.empty();
+            }
+            try {
+                return Optional.of(Duration.parse(timeout.strip()));
+            } catch (DateTimeParseException e) {
+                throw invalid("its joinTimeout '" + timeout + "' is not an ISO-8601 duration such as PT30S");
+            }
+        }
+
         /** The step a path leads to, passing merging gateways; empty if it ends the flow. */
         private Optional<String> reach(FlowNode node) {
             if (node instanceof Task task) {
@@ -211,6 +261,14 @@ public final class BpmnPlanner implements Planner<BpmnFlow> {
             }
             if (node instanceof ExclusiveGateway merge && merge.getOutgoing().size() == 1) {
                 return reach(merge.getOutgoing().iterator().next().getTarget());
+            }
+            if (node instanceof ParallelGateway join && join.getIncoming().size() > 1 && join.getOutgoing().size() == 1) {
+                if (!(join.getOutgoing().iterator().next().getTarget() instanceof Task task)) {
+                    throw invalid("parallel gateway " + join.getId()
+                            + " must lead straight to a task, which runs once the branches meet");
+                }
+                joins.add(task);
+                return Optional.of(stepIds.get(task));
             }
             throw invalid(describe(node) + " must follow a task directly");
         }

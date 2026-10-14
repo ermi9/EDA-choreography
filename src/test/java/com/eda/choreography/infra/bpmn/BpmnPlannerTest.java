@@ -9,6 +9,7 @@ import com.eda.choreography.domain.plan.PlanModel;
 import com.eda.choreography.domain.plan.PlanNode;
 import com.eda.choreography.domain.plan.PlanNode.Split;
 import java.io.IOException;
+import java.time.Duration;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import org.junit.jupiter.api.Test;
@@ -58,6 +59,36 @@ class BpmnPlannerTest {
                 """)));
 
         assertThat(plan.outgoing("a")).containsExactly(new PlanEdge("a", "b", null, false));
+    }
+
+    @Test
+    void parallelGatewaysBecomeAForkAndTheJoinStepAfterWhereTheBranchesMeet() {
+        var plan = planner.plan(fixture("checkout"));
+
+        assertThat(plan.start()).isEqualTo("reserve");
+        assertThat(plan.node("reserve")).map(PlanNode::split).contains(Split.PARALLEL);
+        assertThat(plan.outgoing("reserve")).extracting(PlanEdge::to).containsExactly("pay", "ship");
+        assertThat(plan.node("confirm")).map(PlanNode::kind).contains(PlanNode.Kind.JOIN);
+        assertThat(plan.expectedBranches("confirm")).isEqualTo(2);
+        assertThat(plan.enclosingJoin("pay")).contains("confirm");
+        assertThat(plan.enclosingJoin("ship")).contains("confirm");
+        assertThat(plan.joinTimeout()).contains(Duration.ofSeconds(45));
+    }
+
+    @Test
+    void rejectsAJoinThatLeadsNowhereAndATimeoutThatIsNotADuration() {
+        var fixture = fixture("checkout").xml();
+        assertRejected(fixture.replace("choreo:joinTimeout=\"PT45S\"", "choreo:joinTimeout=\"45 seconds\""),
+                "'45 seconds' is not an ISO-8601 duration");
+        assertRejected(fixture.replace("<bpmn:sequenceFlow id=\"f7\" sourceRef=\"join\" targetRef=\"Task_confirm\" />",
+                        "<bpmn:sequenceFlow id=\"f7\" sourceRef=\"join\" targetRef=\"end\" />"),
+                "must lead straight to a task");
+    }
+
+    @Test
+    void rejectsAJoinStepWhoseServiceAlsoRunsAnotherTask() {
+        var fixture = fixture("checkout").xml();
+        assertRejected(fixture.replace("name=\"confirm\"", "name=\"reserve\""), "joins branches");
     }
 
     @Test

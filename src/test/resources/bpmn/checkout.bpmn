@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:choreo="http://eda.com/choreography"
+                  id="checkout-definitions" targetNamespace="http://eda.com/flows">
+  <bpmn:process id="checkout" isExecutable="true" choreo:joinTimeout="PT45S">
+    <bpmn:startEvent id="start">
+      <bpmn:outgoing>f1</bpmn:outgoing>
+    </bpmn:startEvent>
+    <bpmn:serviceTask id="Task_reserve" name="reserve">
+      <bpmn:incoming>f1</bpmn:incoming>
+      <bpmn:outgoing>f2</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:parallelGateway id="fork">
+      <bpmn:incoming>f2</bpmn:incoming>
+      <bpmn:outgoing>f3</bpmn:outgoing>
+      <bpmn:outgoing>f4</bpmn:outgoing>
+    </bpmn:parallelGateway>
+    <bpmn:serviceTask id="Task_pay" name="pay">
+      <bpmn:incoming>f3</bpmn:incoming>
+      <bpmn:outgoing>f5</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:serviceTask id="Task_ship" name="ship">
+      <bpmn:incoming>f4</bpmn:incoming>
+      <bpmn:outgoing>f6</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:parallelGateway id="join">
+      <bpmn:incoming>f5</bpmn:incoming>
+      <bpmn:incoming>f6</bpmn:incoming>
+      <bpmn:outgoing>f7</bpmn:outgoing>
+    </bpmn:parallelGateway>
+    <bpmn:serviceTask id="Task_confirm" name="confirm">
+      <bpmn:incoming>f7</bpmn:incoming>
+      <bpmn:outgoing>f8</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:endEvent id="end">
+      <bpmn:incoming>f8</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:sequenceFlow id="f1" sourceRef="start" targetRef="Task_reserve" />
+    <bpmn:sequenceFlow id="f2" sourceRef="Task_reserve" targetRef="fork" />
+    <bpmn:sequenceFlow id="f3" sourceRef="fork" targetRef="Task_pay" />
+    <bpmn:sequenceFlow id="f4" sourceRef="fork" targetRef="Task_ship" />
+    <bpmn:sequenceFlow id="f5" sourceRef="Task_pay" targetRef="join" />
+    <bpmn:sequenceFlow id="f6" sourceRef="Task_ship" targetRef="join" />
+    <bpmn:sequenceFlow id="f7" sourceRef="join" targetRef="Task_confirm" />
+    <bpmn:sequenceFlow id="f8" sourceRef="Task_confirm" targetRef="end" />
+  </bpmn:process>
+</bpmn:definitions>
