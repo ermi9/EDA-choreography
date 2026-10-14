@@ -219,6 +219,31 @@ class JoinRunnerTest {
         return sent.sent.get(0).message();
     }
 
+    @Test
+    void aJoinServingSeveralFlowsWaitsAsEachFlowSays() {
+        // "returns" forks three ways and waits a minute; "checkout" forks two ways and waits five.
+        var waits = (JoinWaits) (flowName, joinStep) -> flowName.equals("returns")
+                ? new JoinWait(3, Duration.ofMinutes(1))
+                : new JoinWait(2, TIMEOUT);
+        var shared = new JoinRunner(
+                new StepRunner("J", message -> JOINED, (stepId, message) -> List.of("D"), publisher, trigger),
+                waits, new JoinStateMachine(new InMemoryJoinStateStore()), deadlines, trigger,
+                Clock.fixed(NOW, ZoneOffset.UTC));
+        var forked = ChoreographyMessage.start("return-7", "returns", Map.of()).recordStep("A", Map.of());
+
+        shared.handle(forked.recordStep("B", Map.of()));
+        shared.handle(forked.recordStep("C", Map.of()));
+        assertThat(publisher.sent).isEmpty();
+        assertThat(deadlines.dueBy(NOW.plus(Duration.ofMinutes(1)), 10)).containsExactly(new JoinKey("return-7", "J"));
+
+        shared.handle(forked.recordStep("E", Map.of()));
+        shared.handle(FROM_B);
+        shared.handle(FROM_C);
+
+        assertThat(publisher.sent).extracting(sent -> sent.message().correlationId())
+                .containsExactly("return-7", "order-42");
+    }
+
     private JoinRunner joinPublishingTo(RecordingPublisher sent, InMemoryJoinDeadlines deadlinesOfJoin) {
         return new JoinRunner(
                 new StepRunner("J", message -> JOINED, (stepId, message) -> List.of("D"), sent, trigger),

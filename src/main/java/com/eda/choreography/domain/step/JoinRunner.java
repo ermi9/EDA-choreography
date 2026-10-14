@@ -34,14 +34,15 @@ import java.util.stream.Collectors;
 public final class JoinRunner {
 
     private final StepRunner step;
-    private final int expectedBranches;
-    private final Duration timeout;
+    private final JoinWaits waits;
     private final JoinStateMachine joins;
     private final JoinDeadlines deadlines;
     private final CompensationTrigger compensations;
     private final Clock clock;
 
     /**
+     * A join that waits the same way in every flow.
+     *
      * @param timeout how long the join waits for its last branch, counted from its first
      */
     public JoinRunner(
@@ -52,15 +53,19 @@ public final class JoinRunner {
             JoinDeadlines deadlines,
             CompensationTrigger compensations,
             Clock clock) {
-        if (expectedBranches < 1) {
-            throw new IllegalArgumentException("expectedBranches must be at least 1, was " + expectedBranches);
-        }
-        if (timeout.isNegative() || timeout.isZero()) {
-            throw new IllegalArgumentException("timeout must be positive, was " + timeout);
-        }
+        this(step, JoinWaits.fixed(expectedBranches, timeout), joins, deadlines, compensations, clock);
+    }
+
+    /** A join that waits as the flow of each branch says. */
+    public JoinRunner(
+            StepRunner step,
+            JoinWaits waits,
+            JoinStateMachine joins,
+            JoinDeadlines deadlines,
+            CompensationTrigger compensations,
+            Clock clock) {
         this.step = Objects.requireNonNull(step, "step");
-        this.expectedBranches = expectedBranches;
-        this.timeout = timeout;
+        this.waits = Objects.requireNonNull(waits, "waits");
         this.joins = Objects.requireNonNull(joins, "joins");
         this.deadlines = Objects.requireNonNull(deadlines, "deadlines");
         this.compensations = Objects.requireNonNull(compensations, "compensations");
@@ -96,13 +101,14 @@ public final class JoinRunner {
     private void arrive(ChoreographyMessage branch, Consumer<ChoreographyMessage> whenFired) {
         var branchId = lastEntryOf(branch).id();
         var key = new JoinKey(branch.correlationId(), stepId());
-        var outcome = joins.arrive(new BranchArrival(key, branchId, expectedBranches, branch));
+        var wait = waits.forJoin(branch.flowName(), stepId());
+        var outcome = joins.arrive(new BranchArrival(key, branchId, wait.expectedBranches(), branch));
         if (outcome.decision() == Decision.LATE) {
             compensations.trigger(branch, "join-late:" + branchId, undoneByTimeout(outcome.state()));
             return;
         }
         if (outcome.state().status() == JoinState.Status.OPEN) {
-            deadlines.setIfAbsent(key, clock.instant().plus(timeout));
+            deadlines.setIfAbsent(key, clock.instant().plus(wait.timeout()));
             return;
         }
         if (!outcome.state().fired()) {
