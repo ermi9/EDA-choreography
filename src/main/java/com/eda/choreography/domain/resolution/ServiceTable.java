@@ -1,7 +1,10 @@
 package com.eda.choreography.domain.resolution;
 
+import java.util.Collections;
 import java.util.Map;
 import java.util.Optional;
+import java.util.SortedMap;
+import java.util.TreeMap;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -40,6 +43,20 @@ public final class ServiceTable implements ResolutionSource {
             default -> {
             }
         }
+    }
+
+    /**
+     * Every service the table knows, by name, deregistered ones left out: what a flow can be
+     * drawn with right now. A snapshot; events applied later do not change it.
+     */
+    public SortedMap<String, Resolution> services() {
+        var known = new TreeMap<String, Resolution>();
+        services.forEach((name, entry) -> {
+            if (!entry.deregistered()) {
+                known.put(name, entry.resolution());
+            }
+        });
+        return Collections.unmodifiableSortedMap(known);
     }
 
     @Override

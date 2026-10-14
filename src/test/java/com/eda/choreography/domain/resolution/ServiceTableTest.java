@@ -5,6 +5,7 @@ import static com.eda.choreography.domain.resolution.ServiceEvent.REGISTERED;
 import static com.eda.choreography.domain.resolution.ServiceEvent.STATUS_CHANGED;
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 class ServiceTableTest {
@@ -97,6 +98,18 @@ class ServiceTableTest {
         table.apply(event(REGISTERED, "payment", "unknown", 1));
         table.apply(event(STATUS_CHANGED, "payment", "healthy", 2));
         assertThat(table.resolve("payment")).hasValueSatisfying(resolution -> assertThat(resolution.live()).isTrue());
+    }
+
+    @Test
+    void listsTheServicesItKnowsByNameLeavingOutDeregisteredOnes() {
+        table.apply(event(STATUS_CHANGED, "shipping", "healthy", 1));
+        table.apply(event(REGISTERED, "payment", "unknown", 1));
+        table.apply(event(STATUS_CHANGED, "billing", "healthy", 1));
+        table.apply(event(DEREGISTERED, "billing", "unavailable", 1));
+
+        assertThat(table.services()).containsExactly(
+                Map.entry("payment", new Resolution("payment.in", "payment.compensate", false)),
+                Map.entry("shipping", new Resolution("shipping.in", "shipping.compensate", true)));
     }
 
     @Test
