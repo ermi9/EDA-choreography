@@ -1,0 +1,72 @@
+# The whole system on one host: Kafka, Redis, the discovery platform (its published image), the
+# engine serving the editor and API, and two engines hosting the demo services. Images are pinned
+# by tag through .env; see deploy/README.md.
+name: choreography
+
+x-engine: &engine
+  image: ${ENGINE_IMAGE:-ghcr.io/ermi9/eda-choreography:latest}
+  restart: unless-stopped
+  depends_on: [kafka, redis, discovery]
+  environment: &engine-env
+    KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+    REDIS_HOST: redis
+    DISCOVERY_URL: http://discovery:8080
+    JAVA_TOOL_OPTIONS: -Xmx320m -XX:+UseSerialGC
+
+services:
+  kafka:
+    image: apache/kafka:3.7.0
+    restart: unless-stopped
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_NUM_PARTITIONS: 3
+      KAFKA_HEAP_OPTS: -Xmx512m -Xms512m
+    volumes: [kafka-data:/var/lib/kafka/data]
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+
+  discovery:
+    image: ${DISCOVERY_IMAGE:-ghcr.io/ermi9/eda-discovery-service:latest}
+    restart: unless-stopped
+    depends_on: [kafka, redis]
+    environment:
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      SPRING_DATA_REDIS_HOST: redis
+      HEALTHCHECK_INTERVALMS: 5000
+      JAVA_TOOL_OPTIONS: -Xmx320m -XX:+UseSerialGC
+
+  # The editor and the API, on port 80. It loads the flows in ./flows at startup.
+  engine:
+    <<: *engine
+    ports: ["${PORT:-80}:8080"]
+    volumes: [./flows:/flows:ro]
+
+  # Demo services, each choreographing over its own topics. Hosts register them with discovery.
+  services-a:
+    <<: *engine
+    environment:
+      <<: *engine-env
+      HOSTED_SERVICES: assess,review,reserve,notify
+      PUBLIC_URL: http://services-a:8080
+
+  services-b:
+    <<: *engine
+    environment:
+      <<: *engine-env
+      HOSTED_SERVICES: pay,ship,confirm,charge
+      PUBLIC_URL: http://services-b:8080
+
+volumes:
+  kafka-data:
