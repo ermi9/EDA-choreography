@@ -31,13 +31,17 @@ import java.util.stream.Collectors;
  * @param input         the request that started the instance, as a JSON object; never changes
  * @param trace         every step executed so far, as a well-formed DAG
  * @param results       each step's result as a JSON object, keyed by the producing entry's {@code resultRef}
+ * @param step          the plan step the receiving service is asked to run, or {@code null} for
+ *                      the step named after that service. A service can run several steps of a
+ *                      flow, all fed from its one topic, so the message says which.
  */
 public record ChoreographyMessage(
         String correlationId,
         String flowName,
         Map<String, Object> input,
         List<TraceEntry> trace,
-        Map<String, Map<String, Object>> results) {
+        Map<String, Map<String, Object>> results,
+        String step) {
 
     public ChoreographyMessage {
         requireText(correlationId, "correlationId");
@@ -45,6 +49,9 @@ public record ChoreographyMessage(
         input = JsonObjects.copyOf(input);
         trace = List.copyOf(trace);
         results = copyResults(results);
+        if (step != null && step.isBlank()) {
+            throw new MalformedMessageException("step must be non-blank when present");
+        }
         var graph = TraceGraph.of(trace);
         graph.correlationId()
                 .filter(traced -> !traced.equals(correlationId))
@@ -60,9 +67,19 @@ public record ChoreographyMessage(
         }
     }
 
+    /** A message addressed to no step in particular. */
+    public ChoreographyMessage(
+            String correlationId,
+            String flowName,
+            Map<String, Object> input,
+            List<TraceEntry> trace,
+            Map<String, Map<String, Object>> results) {
+        this(correlationId, flowName, input, trace, results, null);
+    }
+
     /** The message that starts a new instance of a flow with the given request, before any step has run. */
     public static ChoreographyMessage start(String correlationId, String flowName, Map<String, ?> input) {
-        return new ChoreographyMessage(correlationId, flowName, JsonObjects.copyOf(input), List.of(), Map.of());
+        return new ChoreographyMessage(correlationId, flowName, JsonObjects.copyOf(input), List.of(), Map.of(), null);
     }
 
     /**
@@ -75,15 +92,23 @@ public record ChoreographyMessage(
      * becoming a second history.
      */
     public ChoreographyMessage recordStep(String stepId, Map<String, ?> result) {
+        return recordStep(stepId, stepId, result);
+    }
+
+    /**
+     * This message with one more completed step, run by the given service. The message is no
+     * longer addressed to anyone; whoever hands it on addresses it to the next step.
+     */
+    public ChoreographyMessage recordStep(String stepId, String service, Map<String, ?> result) {
         var parents = currentLeafIds();
         var id = entryId(stepId, parents, "");
-        var entry = TraceEntry.completed(id, correlationId, stepId, id, parents.toArray(String[]::new));
+        var entry = TraceEntry.completed(id, correlationId, stepId, id, parents.toArray(String[]::new)).runBy(service);
 
         var nextTrace = new ArrayList<>(trace);
         nextTrace.add(entry);
         var nextResults = new HashMap<>(results);
         nextResults.put(entry.resultRef(), JsonObjects.copyOf(result));
-        return new ChoreographyMessage(correlationId, flowName, input, nextTrace, nextResults);
+        return new ChoreographyMessage(correlationId, flowName, input, nextTrace, nextResults, null);
     }
 
     /**
@@ -95,11 +120,16 @@ public record ChoreographyMessage(
      * may complete, be redelivered and only then fail.
      */
     public ChoreographyMessage recordFailure(String stepId) {
+        return recordFailure(stepId, stepId);
+    }
+
+    /** This message with a failed step of the given service appended. */
+    public ChoreographyMessage recordFailure(String stepId, String service) {
         var parents = currentLeafIds();
         var id = entryId(stepId, parents, "|failed");
         var nextTrace = new ArrayList<>(trace);
-        nextTrace.add(TraceEntry.failed(id, correlationId, stepId, parents.toArray(String[]::new)));
-        return new ChoreographyMessage(correlationId, flowName, input, nextTrace, results);
+        nextTrace.add(TraceEntry.failed(id, correlationId, stepId, parents.toArray(String[]::new)).runBy(service));
+        return new ChoreographyMessage(correlationId, flowName, input, nextTrace, results, null);
     }
 
     /**
@@ -134,7 +164,12 @@ public record ChoreographyMessage(
             branch.results.forEach(results::putIfAbsent);
         }
         return new ChoreographyMessage(
-                first.correlationId, first.flowName, first.input, List.copyOf(entries.values()), results);
+                first.correlationId, first.flowName, first.input, List.copyOf(entries.values()), results, null);
+    }
+
+    /** This message, addressed to the given plan step. */
+    public ChoreographyMessage addressedTo(String step) {
+        return new ChoreographyMessage(correlationId, flowName, input, trace, results, step);
     }
 
     /** Whether any step of this instance has failed. */

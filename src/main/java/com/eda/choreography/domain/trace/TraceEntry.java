@@ -13,7 +13,9 @@ import java.util.Set;
  * @param id            unique id of this execution of the step within the instance
  * @param parents       ids of the entries this step was triggered by; empty for the first step
  * @param correlationId the choreography instance this entry belongs to
- * @param stepId        the plan step / logical service that executed
+ * @param stepId        the plan step that executed
+ * @param service       the logical service that executed it, which undoes it; when absent, the
+ *                      service the step is named after
  * @param outcome       whether the step's effect was committed (and so must be undone)
  * @param resultRef     opaque reference to the step's result, handed to its compensation; may be null
  */
@@ -22,6 +24,7 @@ public record TraceEntry(
         Set<String> parents,
         String correlationId,
         String stepId,
+        String service,
         Outcome outcome,
         String resultRef) {
 
@@ -40,6 +43,10 @@ public record TraceEntry(
         requireText(id, "id");
         requireText(correlationId, "correlationId");
         requireText(stepId, "stepId");
+        if (service == null) {
+            service = stepId;
+        }
+        requireText(service, "service");
         Objects.requireNonNull(outcome, "outcome");
         parents = Set.copyOf(Objects.requireNonNull(parents, "parents"));
         if (parents.contains(id)) {
@@ -47,13 +54,20 @@ public record TraceEntry(
         }
     }
 
+    /** A completed step, run by the service it is named after. */
     public static TraceEntry completed(
             String id, String correlationId, String stepId, String resultRef, String... parents) {
-        return new TraceEntry(id, Set.of(parents), correlationId, stepId, Outcome.COMPLETED, resultRef);
+        return new TraceEntry(id, Set.of(parents), correlationId, stepId, stepId, Outcome.COMPLETED, resultRef);
     }
 
+    /** A failed step, of the service it is named after. */
     public static TraceEntry failed(String id, String correlationId, String stepId, String... parents) {
-        return new TraceEntry(id, Set.of(parents), correlationId, stepId, Outcome.FAILED, null);
+        return new TraceEntry(id, Set.of(parents), correlationId, stepId, stepId, Outcome.FAILED, null);
+    }
+
+    /** This entry, run by the given service. */
+    public TraceEntry runBy(String service) {
+        return new TraceEntry(id, parents, correlationId, stepId, service, outcome, resultRef);
     }
 
     public boolean needsCompensation() {

@@ -238,4 +238,28 @@ class ChoreographyMessageTest {
     private static TraceEntry entryFor(ChoreographyMessage message, String stepId) {
         return message.trace().stream().filter(e -> e.stepId().equals(stepId)).findFirst().orElseThrow();
     }
+
+    @Test
+    void twoStepsOfOneServiceAfterTheSameStepAreTwoEntriesEachRunByThatService() {
+        var reserved = ChoreographyMessage.start("order-42", "checkout", Map.of()).recordStep("reserve", Map.of());
+
+        var buyer = reserved.recordStep("notify-buyer", "notify", Map.of("to", "buyer"));
+        var seller = reserved.recordStep("notify-seller", "notify", Map.of("to", "seller"));
+
+        var buyerEntry = buyer.trace().get(1);
+        var sellerEntry = seller.trace().get(1);
+        assertThat(buyerEntry.id()).isNotEqualTo(sellerEntry.id());
+        assertThat(buyerEntry.service()).isEqualTo("notify");
+        assertThat(sellerEntry.service()).isEqualTo("notify");
+        assertThat(reserved.trace().get(0).service()).isEqualTo("reserve");
+    }
+
+    @Test
+    void recordingAStepClearsTheAddressTheMessageCameWith() {
+        var addressed = ChoreographyMessage.start("order-42", "checkout", Map.of()).addressedTo("reserve");
+
+        assertThat(addressed.step()).isEqualTo("reserve");
+        assertThat(addressed.recordStep("reserve", Map.of()).step()).isNull();
+        assertThat(addressed.recordFailure("reserve", "stock").trace().get(0).service()).isEqualTo("stock");
+    }
 }

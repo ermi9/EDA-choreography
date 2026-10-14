@@ -82,14 +82,38 @@ class MessageWireFormatTest {
         var bytes = MessageWireFormat.serializer().serialize(TOPIC, new RecordHeaders(), message);
         var json = JsonMapper.builder().build().readTree(bytes);
 
-        assertThat(json.propertyNames()).containsExactlyInAnyOrder("correlationId", "flowName", "input", "trace", "results");
+        assertThat(json.propertyNames()).containsExactlyInAnyOrder("correlationId", "flowName", "input", "trace", "results", "step");
         assertThat(json.get("trace").get(0).propertyNames()).containsExactlyInAnyOrder(
-                "id", "parents", "correlationId", "stepId", "outcome", "resultRef");
+                "id", "parents", "correlationId", "stepId", "service", "outcome", "resultRef");
         assertThat(json.get("trace").get(1).get("parents").get(0).asString())
                 .isEqualTo(json.get("trace").get(0).get("id").asString());
         var reserveResult = json.get("results").get(json.get("trace").get(0).get("resultRef").asString());
         assertThat(reserveResult.isObject()).isTrue();
         assertThat(reserveResult.get("quantity").asInt()).isEqualTo(10);
+    }
+
+    @Test
+    void aMessageAddressedToAStepOfAServiceThatRunsSeveralSurvivesTheWire() {
+        var addressed = message.recordStep("notify-buyer", "notify", Map.of("sent", true)).addressedTo("notify-seller");
+        var bytes = MessageWireFormat.serializer().serialize(TOPIC, new RecordHeaders(), addressed);
+
+        assertThat(MessageWireFormat.deserializer().deserialize(TOPIC, new RecordHeaders(), bytes)).isEqualTo(addressed);
+    }
+
+    @Test
+    void aMessageWrittenBeforeStepsNamedTheirServiceReadsAsStepsNamedAfterIt() {
+        var json = """
+                {"correlationId":"order-42","flowName":"checkout","input":{},
+                 "trace":[{"id":"A:1","parents":[],"correlationId":"order-42","stepId":"A",
+                           "outcome":"COMPLETED","resultRef":"A:1"}],
+                 "results":{"A:1":{"quantity":10}}}
+                """;
+
+        var read = MessageWireFormat.deserializer()
+                .deserialize(TOPIC, new RecordHeaders(), json.getBytes(StandardCharsets.UTF_8));
+
+        assertThat(read.step()).isNull();
+        assertThat(read.trace()).singleElement().satisfies(entry -> assertThat(entry.service()).isEqualTo("A"));
     }
 
     @Test
