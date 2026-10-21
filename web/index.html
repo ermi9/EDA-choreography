@@ -63,6 +63,8 @@
   <input id="flow-name" value="my-flow" pattern="[A-Za-z0-9._-]+">
   <label for="join-timeout">Join timeout (ISO-8601, e.g. PT30S)</label>
   <input id="join-timeout" placeholder="default of the engine">
+  <label for="max-iterations">Loop limit (runs of one step)</label>
+  <input id="max-iterations" type="number" min="1" placeholder="default of the engine">
   <div class="row"><button id="save">Save</button><button class="secondary" id="new">New</button></div>
   <label for="stored">Stored flows</label>
   <div class="row"><select id="stored"></select><button class="secondary" id="load">Load</button></div>
@@ -95,12 +97,13 @@
 // The engine's API; same origin by default, or ?api=https://engine-host for an editor hosted elsewhere.
 const API = new URLSearchParams(location.search).get('api') || '';
 
-// choreo:service on tasks and choreo:joinTimeout on the process, as the engine's BpmnPlanner reads them.
+// choreo:service on tasks, and choreo:joinTimeout and choreo:maxIterations on the process, as the
+// engine's BpmnPlanner reads them.
 const choreography = {
   name: 'Choreography', prefix: 'choreo', uri: 'http://eda.com/choreography', xml: { tagAlias: 'lowerCase' },
   types: [
     { name: 'ServiceOfTask', extends: ['bpmn:Task'], properties: [{ name: 'service', isAttr: true, type: 'String' }] },
-    { name: 'TimedProcess', extends: ['bpmn:Process'], properties: [{ name: 'joinTimeout', isAttr: true, type: 'String' }] }
+    { name: 'TimedProcess', extends: ['bpmn:Process'], properties: [{ name: 'joinTimeout', isAttr: true, type: 'String' }, { name: 'maxIterations', isAttr: true, type: 'String' }] }
   ]
 };
 
@@ -125,6 +128,7 @@ async function newDiagram() {
   await modeler.createDiagram();
   modeler.get('canvas').zoom('fit-viewport');
   $('join-timeout').value = '';
+  $('max-iterations').value = '';
 }
 
 function processElement() {
@@ -198,6 +202,7 @@ async function loadFlow(name) {
   canvas.zoom(canvas.zoom() * 0.9, 'auto');
   $('flow-name').value = name;
   $('join-timeout').value = processElement().get('choreo:joinTimeout') || '';
+  $('max-iterations').value = processElement().get('choreo:maxIterations') || '';
   $('run-result').innerHTML = '';
 }
 
@@ -223,6 +228,9 @@ const scenarios = [
   { flow: 'choice-in-branch', title: 'choice-in-branch: charge fails, undo', input: { amount: 20, failAt: 'charge' }, note: 'review was never run, so it is not in the trace and nothing undoes it.' },
   { flow: 'join-timeout', title: 'join-timeout: in time', input: { amount: 10 }, note: 'Both branches reach the join well within its 3 s timeout.' },
   { flow: 'join-timeout', title: 'join-timeout: long branch is late', input: { amount: 10, delayMs: 2000 }, note: 'Each step takes 2 s. The join gives up 3 s after pay arrives and undoes what arrived; the late branch then undoes its own steps.' },
+  { flow: 'retry-loop', title: 'retry-loop: three rounds', input: { rounds: 3 }, note: 'reserve and review run until review has run 3 times, then notify. Each round is a new entry of the trace.' },
+  { flow: 'retry-loop', title: 'retry-loop: review fails in round 2, undo', input: { rounds: 3, failAt: 'review', failAtVisit: 2 }, note: 'Both rounds are undone, latest first: reserve of round 2, then review and reserve of round 1, then assess.' },
+  { flow: 'retry-loop', title: 'retry-loop: never approved, hits its limit', input: { rounds: 10 }, note: 'The flow allows each step 4 runs. reserve would run a 5th time, so it fails and all four rounds are undone.' },
   { flow: 'sale', title: 'sale: seller notice fails, undo', input: { failAt: 'Task_seller' }, note: 'A linear flow where one service, notify, runs two steps. The second fails; charge and the first notify are undone.' }
 ];
 
@@ -243,7 +251,9 @@ $('load-scenario').onclick = async () => {
 $('save').onclick = async () => {
   const name = $('flow-name').value.trim();
   const timeout = $('join-timeout').value.trim();
-  modeling.updateProperties(modeler.get('canvas').getRootElement(), { 'choreo:joinTimeout': timeout || undefined });
+  const limit = $('max-iterations').value.trim();
+  modeling.updateProperties(modeler.get('canvas').getRootElement(),
+      { 'choreo:joinTimeout': timeout || undefined, 'choreo:maxIterations': limit || undefined });
   try {
     const { xml } = await modeler.saveXML({ format: true });
     const saved = await api('PUT', '/api/flows/' + encodeURIComponent(name), xml, 'application/xml');
@@ -340,12 +350,17 @@ function showRun(run, compensations) {
   });
   const entries = new Map();
   [run, ...compensations].forEach(r => r.trace.forEach(entry => entries.set(entry.id, entry)));
-  for (const entry of entries.values()) {
-    const undone = undoneAt.get(entry.id);
-    if (entry.outcome === 'FAILED') { paint(entry.step, 'failed', '✗ failed'); }
-    else if (undone) { paint(entry.step, 'undone', '↶ undone · stage ' + undone.stage + (rounds.length > 1 ? ' (' + undone.round + ')' : '')); }
-    else { paint(entry.step, 'done', '✓ done'); }
-  }
+  // A step a loop ran several times is painted once: failed if any run failed, with ×n for its runs.
+  const runsOfStep = new Map();
+  entries.forEach(entry => runsOfStep.set(entry.step, [...(runsOfStep.get(entry.step) || []), entry]));
+  runsOfStep.forEach((runs, step) => {
+    const times = runs.length > 1 ? ' · ×' + runs.length : '';
+    const undone = runs.map(entry => undoneAt.get(entry.id)).filter(Boolean)
+        .map(at => at.stage + (rounds.length > 1 ? ' (' + at.round + ')' : ''));
+    if (runs.some(entry => entry.outcome === 'FAILED')) { paint(step, 'failed', '✗ failed' + times); }
+    else if (undone.length) { paint(step, 'undone', '↶ undone · stage ' + undone.join(', ') + times); }
+    else { paint(step, 'done', '✓ done' + times); }
+  });
 
   say(run.correlationId + ': ' + run.status, run.status === 'COMPLETED' ? 'success' : 'error');
   const rows = [...entries.values()].map(entry => {
