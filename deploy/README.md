@@ -105,3 +105,51 @@ az vm start -g choreography-rg -n choreography-vm
 ```
 
 Remove everything: `az group delete -n choreography-rg`.
+
+### Driving it from a terminal
+
+The Azure CLI installs without root into a virtual environment of its own:
+
+```sh
+python3 -m venv ~/.local/share/azure-cli
+~/.local/share/azure-cli/bin/pip install azure-cli
+ln -s ~/.local/share/azure-cli/bin/az ~/.local/bin/az
+az login            # once; opens the browser
+```
+
+Then:
+
+```sh
+# Is it running? ("VM running" or "VM deallocated")
+az vm get-instance-view -g choreography-rg -n choreography-vm --query "instanceView.statuses[1].displayStatus" -o tsv
+
+# Turn it on. The stack starts with the VM; the eight services are live about a minute later.
+az vm start -g choreography-rg -n choreography-vm
+curl -s http://68.210.145.132/api/catalog     # eight services, "live": true
+
+# Turn it off, so compute is no longer billed (the disk and the static IP still cost a little).
+az vm deallocate -g choreography-rg -n choreography-vm
+```
+
+`az vm stop` alone powers the machine off but keeps billing for it; use `deallocate`.
+
+### Rolling it onto a new engine
+
+Pushing to `main` publishes `ghcr.io/ermi9/eda-choreography:<commit sha>`. Once that workflow
+is green, copy the flows over and pin the new image:
+
+```sh
+scp -i ~/.ssh/choreography_azure deploy/flows/*.bpmn azureuser@68.210.145.132:~/choreography/flows/
+ssh -i ~/.ssh/choreography_azure azureuser@68.210.145.132
+cd ~/choreography
+sed -i "s|^ENGINE_IMAGE=.*|ENGINE_IMAGE=ghcr.io/ermi9/eda-choreography:<new sha>|" .env
+docker compose pull && docker compose up -d
+```
+
+SSH is only open to the owner's IP (NSG rule `ssh-from-owner`). From a new network, allow the
+new address first:
+
+```sh
+az network nsg rule update -g choreography-rg --nsg-name choreography-nsg -n ssh-from-owner \
+    --source-address-prefixes "$(curl -s -4 ifconfig.me)"
+```
