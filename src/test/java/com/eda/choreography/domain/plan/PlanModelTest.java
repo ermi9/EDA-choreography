@@ -96,6 +96,13 @@ class PlanModelTest {
     }
 
     @Test
+    void carriesHowOftenAStepMayRunIfTheFlowSays() {
+        assertThat(PlanModel.builder("f").task("a").maxRuns(3).build().maxRuns()).contains(3);
+        assertThat(PlanModel.builder("f").task("a").build().maxRuns()).isEmpty();
+        assertRejected(PlanModel.builder("f").task("a").maxRuns(0), "at least once");
+    }
+
+    @Test
     void rejectsStepsAndEdgesThatDoNotFitTogether() {
         assertRejected(PlanModel.builder("f").task("a").task("a"), "step a appears twice");
         assertRejected(PlanModel.builder("f").task("a").edge("a", "b"), "names an unknown step b");

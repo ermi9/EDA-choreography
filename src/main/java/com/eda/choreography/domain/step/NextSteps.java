@@ -39,4 +39,12 @@ public interface NextSteps {
     default String serviceOf(String stepId, ChoreographyMessage message) {
         return stepId;
     }
+
+    /**
+     * How many times a step may run in the message's instance. A loop that would run it once more
+     * fails the step instead, so a loop whose way out never comes still ends. Unlimited by default.
+     */
+    default int maxRuns(String stepId, ChoreographyMessage message) {
+        return Integer.MAX_VALUE;
+    }
 }

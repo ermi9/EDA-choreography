@@ -17,15 +17,28 @@ import java.util.Optional;
  * Every input to its decision is then local to the service deciding.
  *
  * <p>When no route exists, a {@link NoRouteException} is thrown and the step fails.
+ *
+ * <p>A step may run as often as its flow's plan allows, or as the default given here when the
+ * flow sets no limit.
  */
 public final class PlannedRoutes implements NextSteps {
 
     private final Plans plans;
     private final Conditions conditions;
+    private final int defaultMaxRuns;
 
+    /** Routing that lets a step run without limit unless its flow sets one. */
     public PlannedRoutes(Plans plans, Conditions conditions) {
+        this(plans, conditions, Integer.MAX_VALUE);
+    }
+
+    public PlannedRoutes(Plans plans, Conditions conditions, int defaultMaxRuns) {
+        if (defaultMaxRuns < 1) {
+            throw new IllegalArgumentException("a step must be allowed to run at least once, but the default is " + defaultMaxRuns);
+        }
         this.plans = Objects.requireNonNull(plans, "plans");
         this.conditions = Objects.requireNonNull(conditions, "conditions");
+        this.defaultMaxRuns = defaultMaxRuns;
     }
 
     @Override
@@ -56,6 +69,11 @@ public final class PlannedRoutes implements NextSteps {
     @Override
     public String serviceOf(String stepId, ChoreographyMessage message) {
         return planOf(message).serviceOf(stepId);
+    }
+
+    @Override
+    public int maxRuns(String stepId, ChoreographyMessage message) {
+        return planOf(message).maxRuns().orElse(defaultMaxRuns);
     }
 
     /** Planned routing differs by flow, so it cannot answer without the message. */

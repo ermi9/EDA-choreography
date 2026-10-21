@@ -138,6 +138,15 @@ class PlannedRoutesTest {
         assertThat(routes.serviceOf("notify-seller", start("notify-twice"))).isEqualTo("notify");
     }
 
+    @Test
+    void aStepRunsAsOftenAsItsFlowAllowsOrElseAsTheDefault() {
+        var capped = PlanModel.builder("capped").task("poll").maxRuns(3).build();
+        var routes = new PlannedRoutes(Plans.of(capped, LOAN), FIELD_EQUALS, 100);
+
+        assertThat(routes.maxRuns("poll", start("capped"))).isEqualTo(3);
+        assertThat(routes.maxRuns("review", start("loan"))).isEqualTo(100);
+    }
+
     private static ChoreographyMessage start(String flow) {
         return ChoreographyMessage.start("order-42", flow, Map.of());
     }

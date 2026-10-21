@@ -19,6 +19,9 @@ import java.util.function.Predicate;
  * {@link NextHopUnavailableException} is thrown, so the adapter can wait for a late-bound
  * service to appear.
  *
+ * <p>A step that has already run as often as its flow allows fails instead of running again, so
+ * a loop whose way out never comes ends, and is undone like any other failure.
+ *
  * <p>The runner knows nothing about transport. An adapter delivers messages to
  * {@link #handle} and implements {@link MessagePublisher}.
  */
@@ -73,6 +76,10 @@ public final class StepRunner {
      */
     public void handle(ChoreographyMessage incoming) {
         var step = stepOf(incoming);
+        if (incoming.runsOf(step) >= nextSteps.maxRuns(step, incoming)) {
+            reportFailure(step, incoming.recordFailure(step, stepId));
+            return;
+        }
         var outgoing = incoming.recordStep(step, stepId, action.execute(incoming));
         var next = nextSteps.after(step, outgoing);
         if (next.isEmpty()) {

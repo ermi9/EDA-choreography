@@ -35,6 +35,7 @@ public class HostConfig {
             @Value("${spring.kafka.bootstrap-servers}") String bootstrapServers,
             @Value("${choreography.host.partitions:3}") int partitions,
             @Value("${choreography.join.default-timeout}") Duration defaultJoinTimeout,
+            @Value("${choreography.loops.max-iterations}") int defaultMaxRuns,
             StepContainerFactory containers,
             StoredPlans plans,
             Conditions conditions,
@@ -47,7 +48,7 @@ public class HostConfig {
             DiscoveryRegistration registration) {
         var hosted = services.stream().map(String::strip).filter(service -> !service.isEmpty()).toList();
         return new ServiceHost(hosted, new ServiceHost.Dependencies(bootstrapServers, partitions, containers, plans,
-                conditions, defaultJoinTimeout, publisher, compensationPublisher, compensations, joins, deadlines,
+                conditions, defaultJoinTimeout, defaultMaxRuns, publisher, compensationPublisher, compensations, joins, deadlines,
                 catalog, registration));
     }
 }

@@ -53,6 +53,7 @@ public final class PlanModel {
     private final Map<String, String> enclosingJoins;
     private final Map<String, Integer> expectedBranches;
     private final Duration joinTimeout;
+    private final Integer maxRuns;
 
     private PlanModel(Builder builder) {
         if (builder.flowName == null || builder.flowName.isBlank()) {
@@ -83,6 +84,10 @@ public final class PlanModel {
             throw invalid("the join timeout must be positive, was " + builder.joinTimeout);
         }
         this.joinTimeout = builder.joinTimeout;
+        if (builder.maxRuns != null && builder.maxRuns < 1) {
+            throw invalid("a step must be allowed to run at least once, but the limit is " + builder.maxRuns);
+        }
+        this.maxRuns = builder.maxRuns;
     }
 
     public static Builder builder(String flowName) {
@@ -140,6 +145,11 @@ public final class PlanModel {
     /** How long this flow's joins wait for their last branch, if the flow says. */
     public Optional<Duration> joinTimeout() {
         return Optional.ofNullable(joinTimeout);
+    }
+
+    /** How many times a step may run in one instance, if the flow says; a loop that goes on longer fails. */
+    public Optional<Integer> maxRuns() {
+        return Optional.ofNullable(maxRuns);
     }
 
     private Map<String, PlanNode> indexNodes(List<PlanNode> drawn) {
@@ -382,6 +392,7 @@ public final class PlanModel {
         private final List<PlanNode> nodes = new ArrayList<>();
         private final List<PlanEdge> edges = new ArrayList<>();
         private Duration joinTimeout;
+        private Integer maxRuns;
 
         private Builder(String flowName) {
             this.flowName = flowName;
@@ -428,6 +439,11 @@ public final class PlanModel {
 
         public Builder joinTimeout(Duration timeout) {
             this.joinTimeout = timeout;
+            return this;
+        }
+
+        public Builder maxRuns(int maxRuns) {
+            this.maxRuns = maxRuns;
             return this;
         }
 

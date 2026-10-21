@@ -105,6 +105,37 @@ class StepRunnerTest {
     }
 
     @Test
+    void aStepThatHasRunAsOftenAsItsFlowAllowsFailsInsteadOfRunningAgainAndTheInstanceIsUndone() {
+        NextSteps loop = new NextSteps() {
+            @Override
+            public List<String> after(String stepId, ChoreographyMessage message) {
+                return List.of(stepId.equals("A") ? "B" : "A");
+            }
+
+            @Override
+            public int maxRuns(String stepId, ChoreographyMessage message) {
+                return 2;
+            }
+        };
+        var twice = ChoreographyMessage.start("order-42", "checkout", Map.of())
+                .recordStep("A", RESERVED).recordStep("B", PRICED)
+                .recordStep("A", RESERVED).recordStep("B", PRICED);
+        var runner = new StepRunner("A", message -> {
+            throw new AssertionError("a step past its limit must not run");
+        }, loop, publisher, trigger);
+
+        runner.handle(twice);
+
+        var failed = twice.recordFailure("A");
+        assertThat(publisher.sent).isEmpty();
+        assertThat(compensations.requests).singleElement().satisfies(sent -> {
+            assertThat(sent.stepId()).isEqualTo("B");
+            assertThat(sent.request().entryId()).isEqualTo(twice.trace().get(3).id());
+            assertThat(sent.request().instance()).isEqualTo(failed);
+        });
+    }
+
+    @Test
     void aFirstStepThatGivesUpLeavesNothingToUndo() {
         var start = ChoreographyMessage.start("order-42", "checkout", Map.of());
         var runner = new StepRunner("A", message -> RESERVED, FLOW, publisher, trigger);

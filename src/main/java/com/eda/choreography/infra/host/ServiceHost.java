@@ -52,6 +52,7 @@ public class ServiceHost implements SmartLifecycle {
             Plans plans,
             Conditions conditions,
             Duration defaultJoinTimeout,
+            int defaultMaxRuns,
             MessagePublisher publisher,
             CompensationPublisher compensationPublisher,
             CompensationTrigger compensations,
@@ -76,7 +77,7 @@ public class ServiceHost implements SmartLifecycle {
             return;
         }
         createTopics();
-        var routes = new PlannedRoutes(dependencies.plans(), dependencies.conditions());
+        var routes = new PlannedRoutes(dependencies.plans(), dependencies.conditions(), dependencies.defaultMaxRuns());
         var waits = new PlannedJoinWaits(dependencies.plans(), dependencies.defaultJoinTimeout());
         for (var service : services) {
             var step = new StepRunner(service, new DemoAction(service), routes,

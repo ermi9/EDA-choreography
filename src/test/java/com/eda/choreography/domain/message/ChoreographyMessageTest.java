@@ -100,6 +100,19 @@ class ChoreographyMessageTest {
     }
 
     @Test
+    void countsTheCompletedRunsOfAStepThatALoopRepeats() {
+        var message = ChoreographyMessage.start("order-42", "checkout", Map.of())
+                .recordStep("A", RESERVED)
+                .recordStep("B", PRICED)
+                .recordStep("A", RESERVED)
+                .recordFailure("B");
+
+        assertThat(message.runsOf("A")).isEqualTo(2);
+        assertThat(message.runsOf("B")).isEqualTo(1);
+        assertThat(message.runsOf("C")).isZero();
+    }
+
+    @Test
     void aFailedStepIsChainedLikeAnyOtherButLeavesNothingToUndo() {
         var reserved = ChoreographyMessage.start(CORRELATION, FLOW, Map.of()).recordStep("A", RESERVED);
 

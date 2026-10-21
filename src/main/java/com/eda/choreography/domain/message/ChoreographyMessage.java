@@ -186,6 +186,13 @@ public record ChoreographyMessage(
                 .findFirst();
     }
 
+    /** How many times a step has completed in this instance so far; a loop runs a step more than once. */
+    public int runsOf(String stepId) {
+        return (int) trace.stream()
+                .filter(entry -> entry.stepId().equals(stepId) && entry.outcome() == TraceEntry.Outcome.COMPLETED)
+                .count();
+    }
+
     private static Map<String, Map<String, Object>> copyResults(Map<String, Map<String, Object>> results) {
         var copy = new HashMap<String, Map<String, Object>>();
         results.forEach((ref, result) -> copy.put(ref, JsonObjects.copyOf(result)));
