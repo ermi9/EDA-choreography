@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                  xmlns:choreo="http://eda.com/choreography"
+                  id="retry-definitions" targetNamespace="http://eda.com/flows">
+  <bpmn:process id="retry" isExecutable="true" choreo:maxIterations="5">
+    <bpmn:startEvent id="start">
+      <bpmn:outgoing>f1</bpmn:outgoing>
+    </bpmn:startEvent>
+    <bpmn:serviceTask id="Task_intake" name="intake">
+      <bpmn:incoming>f1</bpmn:incoming>
+      <bpmn:outgoing>f2</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:exclusiveGateway id="again">
+      <bpmn:incoming>f2</bpmn:incoming>
+      <bpmn:incoming>back</bpmn:incoming>
+      <bpmn:outgoing>f3</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:serviceTask id="Task_draft" name="draft">
+      <bpmn:incoming>f3</bpmn:incoming>
+      <bpmn:outgoing>f4</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:serviceTask id="Task_review" name="review">
+      <bpmn:incoming>f4</bpmn:incoming>
+      <bpmn:outgoing>f5</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:exclusiveGateway id="approved" default="back">
+      <bpmn:incoming>f5</bpmn:incoming>
+      <bpmn:outgoing>yes</bpmn:outgoing>
+      <bpmn:outgoing>back</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:serviceTask id="Task_publish" name="publish">
+      <bpmn:incoming>yes</bpmn:incoming>
+      <bpmn:outgoing>f6</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:endEvent id="end">
+      <bpmn:incoming>f6</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:sequenceFlow id="f1" sourceRef="start" targetRef="Task_intake" />
+    <bpmn:sequenceFlow id="f2" sourceRef="Task_intake" targetRef="again" />
+    <bpmn:sequenceFlow id="f3" sourceRef="again" targetRef="Task_draft" />
+    <bpmn:sequenceFlow id="f4" sourceRef="Task_draft" targetRef="Task_review" />
+    <bpmn:sequenceFlow id="f5" sourceRef="Task_review" targetRef="approved" />
+    <bpmn:sequenceFlow id="yes" sourceRef="approved" targetRef="Task_publish">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">#result['visits'] &gt;= 3</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="back" sourceRef="approved" targetRef="again" />
+    <bpmn:sequenceFlow id="f6" sourceRef="Task_publish" targetRef="end" />
+  </bpmn:process>
+</bpmn:definitions>

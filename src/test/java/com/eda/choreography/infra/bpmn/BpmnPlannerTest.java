@@ -76,6 +76,58 @@ class BpmnPlannerTest {
     }
 
     @Test
+    void aFlowBackToAMergingGatewayBecomesALoopWithTheFlowsLimit() {
+        var plan = planner.plan(fixture("retry"));
+
+        assertThat(plan.start()).isEqualTo("intake");
+        assertThat(plan.outgoing("review")).containsExactly(
+                new PlanEdge("review", "publish", "#result['visits'] >= 3", false),
+                new PlanEdge("review", "draft", null, true));
+        assertThat(plan.outgoing("intake")).extracting(PlanEdge::to).containsExactly("draft");
+        assertThat(plan.maxRuns()).contains(5);
+    }
+
+    @Test
+    void aFlowBackStraightIntoATaskIsALoopToo() {
+        var plan = planner.plan(new BpmnFlow("poll", process("""
+                <bpmn:startEvent id="s"><bpmn:outgoing>f1</bpmn:outgoing></bpmn:startEvent>
+                <bpmn:serviceTask id="a" name="a"><bpmn:incoming>f1</bpmn:incoming><bpmn:outgoing>f2</bpmn:outgoing></bpmn:serviceTask>
+                <bpmn:serviceTask id="b" name="b"><bpmn:incoming>f2</bpmn:incoming><bpmn:incoming>f4</bpmn:incoming><bpmn:outgoing>f3</bpmn:outgoing></bpmn:serviceTask>
+                <bpmn:exclusiveGateway id="g" default="f5"><bpmn:incoming>f3</bpmn:incoming><bpmn:outgoing>f4</bpmn:outgoing><bpmn:outgoing>f5</bpmn:outgoing></bpmn:exclusiveGateway>
+                <bpmn:serviceTask id="c" name="c"><bpmn:incoming>f5</bpmn:incoming><bpmn:outgoing>f6</bpmn:outgoing></bpmn:serviceTask>
+                <bpmn:endEvent id="e"><bpmn:incoming>f6</bpmn:incoming></bpmn:endEvent>
+                <bpmn:sequenceFlow id="f1" sourceRef="s" targetRef="a" />
+                <bpmn:sequenceFlow id="f2" sourceRef="a" targetRef="b" />
+                <bpmn:sequenceFlow id="f3" sourceRef="b" targetRef="g" />
+                <bpmn:sequenceFlow id="f4" sourceRef="g" targetRef="b">
+                  <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">#result['pending']</bpmn:conditionExpression>
+                </bpmn:sequenceFlow>
+                <bpmn:sequenceFlow id="f5" sourceRef="g" targetRef="c" />
+                <bpmn:sequenceFlow id="f6" sourceRef="c" targetRef="e" />
+                """)));
+
+        assertThat(plan.outgoing("b")).extracting(PlanEdge::to).containsExactly("b", "c");
+        assertThat(plan.maxRuns()).isEmpty();
+    }
+
+    @Test
+    void rejectsALoopOfGatewaysAloneAndALimitThatIsNotAWholeNumber() {
+        assertRejected(process("""
+                <bpmn:startEvent id="s"><bpmn:outgoing>f1</bpmn:outgoing></bpmn:startEvent>
+                <bpmn:serviceTask id="a" name="a"><bpmn:incoming>f1</bpmn:incoming><bpmn:outgoing>f2</bpmn:outgoing></bpmn:serviceTask>
+                <bpmn:exclusiveGateway id="g1"><bpmn:incoming>f2</bpmn:incoming><bpmn:incoming>f4</bpmn:incoming><bpmn:outgoing>f3</bpmn:outgoing></bpmn:exclusiveGateway>
+                <bpmn:exclusiveGateway id="g2"><bpmn:incoming>f3</bpmn:incoming><bpmn:outgoing>f4</bpmn:outgoing></bpmn:exclusiveGateway>
+                <bpmn:sequenceFlow id="f1" sourceRef="s" targetRef="a" />
+                <bpmn:sequenceFlow id="f2" sourceRef="a" targetRef="g1" />
+                <bpmn:sequenceFlow id="f3" sourceRef="g1" targetRef="g2" />
+                <bpmn:sequenceFlow id="f4" sourceRef="g2" targetRef="g1" />
+                """), "gateway g1 lies on a loop with no task");
+        var fixture = fixture("retry").xml();
+        assertRejected(fixture.replace("choreo:maxIterations=\"5\"", "choreo:maxIterations=\"lots\""),
+                "its maxIterations 'lots' is not a whole number");
+    }
+
+    @Test
     void rejectsAJoinThatLeadsNowhereAndATimeoutThatIsNotADuration() {
         var fixture = fixture("checkout").xml();
         assertRejected(fixture.replace("choreo:joinTimeout=\"PT45S\"", "choreo:joinTimeout=\"45 seconds\""),

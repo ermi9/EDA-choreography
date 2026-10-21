@@ -49,8 +49,12 @@ import org.camunda.bpm.model.xml.ModelException;
  *       parallel gateway where the branches meet must lead straight to a task: that task is the
  *       join step, which runs once every branch has arrived. A join step is named after its
  *       service, so its service runs no other task of the flow;</li>
+ *   <li>a flow back to an earlier merging gateway, or straight into an earlier task, draws a
+ *       loop. It leaves through a choice, and a step in it runs again each time round;</li>
  *   <li>the process attribute {@code choreo:joinTimeout}, an ISO-8601 duration such as
  *       {@code PT30S}, is how long the flow's joins wait for their last branch;</li>
+ *   <li>the process attribute {@code choreo:maxIterations}, a whole number, is how many times a
+ *       step may run in one instance before it fails;</li>
  *   <li>compensation tasks and the boundary events that point at them are left out: a step is
  *       undone by its own service, through the compensation topic discovery gave it.</li>
  * </ul>
@@ -123,6 +127,7 @@ public final class BpmnPlanner implements Planner<BpmnFlow> {
                 }
             }
             joinTimeout().ifPresent(plan::joinTimeout);
+            maxIterations().ifPresent(plan::maxRuns);
             for (var edge : edges) {
                 switch (edge[2]) {
                     case "plain" -> plan.edge(edge[0], edge[1]);
@@ -251,8 +256,24 @@ public final class BpmnPlanner implements Planner<BpmnFlow> {
             }
         }
 
+        private Optional<Integer> maxIterations() {
+            var limit = process.getAttributeValueNs(NAMESPACE, "maxIterations");
+            if (limit == null || limit.isBlank()) {
+                return Optional.empty();
+            }
+            try {
+                return Optional.of(Integer.parseInt(limit.strip()));
+            } catch (NumberFormatException e) {
+                throw invalid("its maxIterations '" + limit + "' is not a whole number");
+            }
+        }
+
         /** The step a path leads to, passing merging gateways; empty if it ends the flow. */
         private Optional<String> reach(FlowNode node) {
+            return reach(node, new HashSet<>());
+        }
+
+        private Optional<String> reach(FlowNode node, Set<FlowNode> passed) {
             if (node instanceof Task task) {
                 return Optional.of(stepIds.get(task));
             }
@@ -260,7 +281,10 @@ public final class BpmnPlanner implements Planner<BpmnFlow> {
                 return Optional.empty();
             }
             if (node instanceof ExclusiveGateway merge && merge.getOutgoing().size() == 1) {
-                return reach(merge.getOutgoing().iterator().next().getTarget());
+                if (!passed.add(merge)) {
+                    throw invalid("gateway " + merge.getId() + " lies on a loop with no task in it");
+                }
+                return reach(merge.getOutgoing().iterator().next().getTarget(), passed);
             }
             if (node instanceof ParallelGateway join && join.getIncoming().size() > 1 && join.getOutgoing().size() == 1) {
                 if (!(join.getOutgoing().iterator().next().getTarget() instanceof Task task)) {
