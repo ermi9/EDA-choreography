@@ -22,14 +22,20 @@ import java.util.Set;
  * <p>A plan is checked whole when it is built, and one that cannot run as drawn is rejected
  * with an {@link InvalidPlanException}:
  * <ul>
- *   <li>it has one start step, reaches every step from there, and has no cycle;</li>
+ *   <li>it has one start step and reaches every step from there;</li>
  *   <li>a step with several edges out is a fork (all edges taken) or a choice (the first edge
  *       whose condition holds, else its one default edge);</li>
  *   <li>the branches of a fork meet at exactly one join, each branch runs at least one step on
  *       the way, and nothing outside the fork enters a branch;</li>
- *   <li>a join closes exactly one fork, and forks are not nested.</li>
+ *   <li>a join closes exactly one fork, and forks are not nested;</li>
+ *   <li>every loop holds a choice with an edge leaving the loop, and no fork or join.</li>
  * </ul>
  * Choices may sit anywhere, inside a branch too, and may come back together at a plain step.
+ *
+ * <p>A loop runs its steps again, each run a new entry of the trace, so the trace stays acyclic
+ * and is undone in reverse like any other. A join keeps one state per instance, so it cannot run
+ * twice, and neither can the fork it closes. A loop inside a branch is fine: it stays on one
+ * branch, which reaches the join once.
  *
  * <p>A step names the service that runs it, and one service may run several steps. A join is
  * the exception: it is named after its service, because its state and its timeout notice are
@@ -56,8 +62,9 @@ public final class PlanModel {
         this.nodes = indexNodes(builder.nodes);
         this.outgoing = indexEdges(builder.edges);
         this.start = findStart(builder.edges);
-        checkAcyclic();
+        checkReachable();
         nodes.values().forEach(this::checkSplit);
+        loops().forEach(this::checkLoop);
         this.enclosingJoins = new HashMap<>();
         this.expectedBranches = new HashMap<>();
         var forks = nodes.values().stream().filter(node -> node.split() == Split.PARALLEL).toList();
@@ -169,41 +176,65 @@ public final class PlanModel {
     private String findStart(List<PlanEdge> drawn) {
         var starts = new LinkedHashSet<>(nodes.keySet());
         drawn.forEach(edge -> starts.remove(edge.to()));
+        if (starts.isEmpty()) {
+            throw invalid("it needs exactly one start step, a step nothing leads to, but has none; a flow cannot start inside a loop");
+        }
         if (starts.size() != 1) {
             throw invalid("it needs exactly one start step, a step nothing leads to, but has " + starts);
         }
         return starts.iterator().next();
     }
 
-    /** Kahn's algorithm: whatever cannot be ordered lies on a cycle or behind one. */
-    private void checkAcyclic() {
-        var incoming = new HashMap<String, Integer>();
-        nodes.keySet().forEach(id -> incoming.put(id, 0));
-        outgoing.values().forEach(edges -> edges.forEach(edge -> incoming.merge(edge.to(), 1, Integer::sum)));
-        var ready = new ArrayDeque<String>();
-        incoming.forEach((id, count) -> {
-            if (count == 0) {
-                ready.add(id);
-            }
-        });
-        var ordered = 0;
-        while (!ready.isEmpty()) {
-            var id = ready.poll();
-            ordered++;
-            for (var edge : outgoing(id)) {
-                if (incoming.merge(edge.to(), -1, Integer::sum) == 0) {
-                    ready.add(edge.to());
-                }
+    private void checkReachable() {
+        var reached = new HashSet<String>();
+        var pending = new ArrayDeque<>(List.of(start));
+        while (!pending.isEmpty()) {
+            var id = pending.poll();
+            if (reached.add(id)) {
+                outgoing(id).forEach(edge -> pending.add(edge.to()));
             }
         }
-        if (ordered != nodes.size()) {
-            var stuck = new HashSet<String>();
-            incoming.forEach((id, count) -> {
-                if (count > 0) {
-                    stuck.add(id);
-                }
-            });
-            throw invalid("it has a cycle through " + stuck);
+        var unreached = nodes.keySet().stream().filter(id -> !reached.contains(id)).toList();
+        if (!unreached.isEmpty()) {
+            throw invalid("steps " + unreached + " cannot be reached from start step " + start);
+        }
+    }
+
+    /**
+     * Tarjan's algorithm: a strongly connected set of more than one step, or a step with an edge to
+     * itself, is a loop. Each loop lists its steps in drawn order.
+     */
+    private List<List<String>> loops() {
+        var tarjan = new Tarjan();
+        nodes.keySet().forEach(id -> {
+            if (!tarjan.index.containsKey(id)) {
+                tarjan.visit(id);
+            }
+        });
+        var order = new ArrayList<>(nodes.keySet());
+        return tarjan.components.stream()
+                .filter(component -> component.size() > 1 || outgoing(component.iterator().next()).stream()
+                        .anyMatch(edge -> component.contains(edge.to())))
+                .map(component -> component.stream().sorted((a, b) -> order.indexOf(a) - order.indexOf(b)).toList())
+                .toList();
+    }
+
+    private void checkLoop(List<String> loop) {
+        for (var id : loop) {
+            var node = nodes.get(id);
+            if (node.kind() == Kind.JOIN) {
+                throw invalid("join " + id + " is inside the loop through " + loop + "; a join runs once per instance");
+            }
+            if (node.split() == Split.PARALLEL) {
+                throw invalid("fork " + id + " is inside the loop through " + loop + "; a fork runs once per instance");
+            }
+        }
+        var wayOut = loop.stream()
+                .filter(id -> nodes.get(id).split() == Split.EXCLUSIVE)
+                .flatMap(id -> outgoing(id).stream())
+                .anyMatch(edge -> !loop.contains(edge.to()));
+        if (!wayOut) {
+            throw invalid("the loop through " + loop + " has no way out; give it a choice with an edge leaving the loop");
         }
     }
 
@@ -307,6 +338,42 @@ public final class PlanModel {
 
     private InvalidPlanException invalid(String reason) {
         return new InvalidPlanException("flow " + flowName + " cannot run: " + reason);
+    }
+
+    /** One run of Tarjan's algorithm over the plan's steps; plans are small, so it recurses. */
+    private final class Tarjan {
+
+        private final Map<String, Integer> index = new HashMap<>();
+        private final Map<String, Integer> lowLink = new HashMap<>();
+        private final ArrayDeque<String> stack = new ArrayDeque<>();
+        private final Set<String> onStack = new HashSet<>();
+        private final List<Set<String>> components = new ArrayList<>();
+
+        void visit(String id) {
+            index.put(id, index.size());
+            lowLink.put(id, index.get(id));
+            stack.push(id);
+            onStack.add(id);
+            for (var edge : outgoing(id)) {
+                var next = edge.to();
+                if (!index.containsKey(next)) {
+                    visit(next);
+                    lowLink.put(id, Math.min(lowLink.get(id), lowLink.get(next)));
+                } else if (onStack.contains(next)) {
+                    lowLink.put(id, Math.min(lowLink.get(id), index.get(next)));
+                }
+            }
+            if (lowLink.get(id).equals(index.get(id))) {
+                var component = new HashSet<String>();
+                String member;
+                do {
+                    member = stack.pop();
+                    onStack.remove(member);
+                    component.add(member);
+                } while (!member.equals(id));
+                components.add(component);
+            }
+        }
     }
 
     public static final class Builder {

@@ -111,11 +111,57 @@ class PlanModelTest {
     }
 
     @Test
-    void rejectsACycle() {
+    void acceptsALoopThatAChoiceCanLeave() {
+        // draft -> review -> (approved) publish | (default) back to draft
+        var plan = PlanModel.builder("f")
+                .task("intake").task("draft").task("review", Split.EXCLUSIVE).task("publish")
+                .edge("intake", "draft").edge("draft", "review")
+                .edge("review", "publish", "#result['approved']").defaultEdge("review", "draft")
+                .build();
+
+        assertThat(plan.start()).isEqualTo("intake");
+        assertThat(plan.outgoing("review")).extracting(PlanEdge::to).containsExactly("publish", "draft");
+    }
+
+    @Test
+    void acceptsAStepThatLoopsOnItselfAndALoopInsideABranch() {
+        PlanModel.builder("f").task("s").task("poll", Split.EXCLUSIVE).task("done")
+                .edge("s", "poll").edge("poll", "poll", "#result['pending']").defaultEdge("poll", "done")
+                .build();
+        var plan = PlanModel.builder("f").task("a", Split.PARALLEL).task("b", Split.EXCLUSIVE).task("c").join("j")
+                .edge("a", "b").edge("a", "c")
+                .edge("b", "b", "#result['again']").defaultEdge("b", "j").edge("c", "j")
+                .build();
+
+        assertThat(plan.enclosingJoin("b")).contains("j");
+        assertThat(plan.expectedBranches("j")).isEqualTo(2);
+    }
+
+    @Test
+    void rejectsALoopWithNoWayOut() {
         assertRejected(PlanModel.builder("f").task("a").task("b").task("c")
-                .edge("a", "b").edge("b", "c").edge("c", "b"), "cycle");
+                .edge("a", "b").edge("b", "c").edge("c", "b"), "the loop through [b, c] has no way out");
+        // A choice inside the loop whose every edge stays in it is no way out either.
+        assertRejected(PlanModel.builder("f").task("a").task("b", Split.EXCLUSIVE).task("c")
+                .edge("a", "b").edge("b", "c", "#result['x']").defaultEdge("b", "b").edge("c", "b"),
+                "the loop through [b, c] has no way out");
+    }
+
+    @Test
+    void rejectsAForkOrAJoinInsideALoop() {
+        assertRejected(PlanModel.builder("f").task("s").task("a", Split.PARALLEL).task("b").task("c")
+                .join("j", Split.EXCLUSIVE).task("end")
+                .edge("s", "a").edge("a", "b").edge("a", "c").edge("b", "j").edge("c", "j")
+                .edge("j", "a", "#result['again']").defaultEdge("j", "end"), "fork a is inside the loop through [a, b, c, j]");
+    }
+
+    @Test
+    void rejectsAStartInsideALoopAndStepsThatCannotBeReached() {
+        assertRejected(PlanModel.builder("f").task("a").task("b", Split.EXCLUSIVE).task("c")
+                .edge("a", "b").edge("b", "a", "#result['x']").defaultEdge("b", "c"), "a flow cannot start inside a loop");
         assertRejected(PlanModel.builder("f").task("s").task("a").task("b", Split.EXCLUSIVE).task("c")
-                .edge("s", "a").edge("a", "b").edge("b", "a", "#result['again']").defaultEdge("b", "c"), "cycle");
+                .edge("a", "b").edge("b", "a", "#result['x']").defaultEdge("b", "c"),
+                "steps [a, b, c] cannot be reached from start step s");
     }
 
     @Test
