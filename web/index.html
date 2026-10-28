@@ -231,7 +231,15 @@ const scenarios = [
   { flow: 'retry-loop', title: 'retry-loop: three rounds', input: { rounds: 3 }, note: 'reserve and review run until review has run 3 times, then notify. Each round is a new entry of the trace.' },
   { flow: 'retry-loop', title: 'retry-loop: review fails in round 2, undo', input: { rounds: 3, failAt: 'review', failAtVisit: 2 }, note: 'Both rounds are undone, latest first: reserve of round 2, then review and reserve of round 1, then assess.' },
   { flow: 'retry-loop', title: 'retry-loop: never approved, hits its limit', input: { rounds: 10 }, note: 'The flow allows each step 4 runs. reserve would run a 5th time, so it fails and all four rounds are undone.' },
-  { flow: 'sale', title: 'sale: seller notice fails, undo', input: { failAt: 'Task_seller' }, note: 'A linear flow where one service, notify, runs two steps. The second fails; charge and the first notify are undone.' }
+  { flow: 'sale', title: 'sale: seller notice fails, undo', input: { failAt: 'Task_seller' }, note: 'A linear flow where one service, notify, runs two steps. The second fails; charge and the first notify are undone.' },
+  { flow: 'showcase', title: 'showcase: small order', input: { amount: 20 }, note: 'Review is skipped, reserve runs once, pay and ship run in parallel and join at confirm, notify runs twice.' },
+  { flow: 'showcase', title: 'showcase: large express order, two rounds', input: { amount: 5000, rounds: 2, express: true }, note: 'Review runs, reserve goes round twice, and the choice inside the ship branch adds charge.' },
+  { flow: 'showcase', title: 'showcase: charge fails in the branch, undo', input: { amount: 5000, rounds: 2, express: true, failAt: 'charge' }, note: 'pay and ship are undone first, then notify, both reserve rounds latest first, review and assess.' },
+  { flow: 'showcase', title: 'showcase: reserve fails in round 2, undo', input: { amount: 20, rounds: 3, failAt: 'reserve', failAtVisit: 2 }, note: 'Only round 1 of reserve and assess were done, so only they are undone. Nothing after the loop ran.' },
+  { flow: 'showcase', title: 'showcase: loop hits its limit', input: { amount: 20, rounds: 10 }, note: 'The flow allows each step 3 runs. reserve would run a 4th time, so it fails and its three rounds are undone.' },
+  { flow: 'showcase', title: 'showcase: last notify fails after the join', input: { amount: 20, failAt: 'Task_done' }, note: 'Everything ran, so everything is undone: confirm, then both branches, then the steps before the fork.' },
+  { flow: 'showcase', title: 'showcase: express branch misses the join', input: { amount: 20, express: true, delayMs: 5000 }, note: 'Each step takes 5 s. The ship branch has one step more, so it arrives over 3 s after pay; the join gives up, and the late branch undoes itself.' },
+  { flow: 'showcase', title: 'showcase: gift needs a service nobody runs', input: { amount: 20, gift: true }, note: 'wrap is late-bound and never registers. confirm waits 30 s for it, then wrap counts as failed and everything is undone.' }
 ];
 
 scenarios.forEach((scenario, i) => $('scenario').append(new Option(scenario.title, i)));
