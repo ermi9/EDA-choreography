@@ -1,6 +1,7 @@
 package com.eda.choreography.domain.join;
 
 import java.time.Clock;
+import java.util.HashSet;
 import java.util.Objects;
 
 /**
@@ -29,16 +30,37 @@ public final class JoinDeadlineSweeper {
         this.batchSize = batchSize;
     }
 
-    /** Sends a notice for every join due now, a batch at a time, and returns how many it sent. */
+    /**
+     * Sends a notice for every join due now, a batch at a time, and returns how many it sent. A
+     * join whose notice cannot be sent keeps its deadline, to be tried again next sweep, and the
+     * sweep goes on with the others; the first failure is thrown once they are done.
+     */
     public int sweep() {
         var now = clock.instant();
         int sent = 0;
-        for (var due = deadlines.dueBy(now, batchSize); !due.isEmpty(); due = deadlines.dueBy(now, batchSize)) {
+        var failed = new HashSet<JoinKey>();
+        RuntimeException firstFailure = null;
+        while (true) {
+            var due = deadlines.dueBy(now, batchSize + failed.size()).stream()
+                    .filter(key -> !failed.contains(key))
+                    .toList();
+            if (due.isEmpty()) {
+                break;
+            }
             for (var key : due) {
-                notices.publish(key);
+                try {
+                    notices.publish(key);
+                } catch (RuntimeException e) {
+                    failed.add(key);
+                    firstFailure = firstFailure == null ? e : firstFailure;
+                    continue;
+                }
                 deadlines.remove(key);
                 sent++;
             }
+        }
+        if (firstFailure != null) {
+            throw firstFailure;
         }
         return sent;
     }

@@ -44,4 +44,23 @@ class JoinDeadlineSweeperTest {
         assertThatThrownBy(failing::sweep).hasMessage("broker unreachable");
         assertThat(deadlines.dueBy(NOW, 10)).containsExactly(key);
     }
+
+    @Test
+    void stillTimesOutTheOtherJoinsWhenOneNoticeCannotBeSent() {
+        var unknown = new JoinKey("corr-1", "J");
+        var others = List.of(new JoinKey("corr-2", "K"), new JoinKey("corr-3", "K"), new JoinKey("corr-4", "K"));
+        deadlines.setIfAbsent(unknown, NOW.minusSeconds(2));
+        others.forEach(key -> deadlines.setIfAbsent(key, NOW.minusSeconds(1)));
+        var sent = new ArrayList<JoinKey>();
+        var failingOnOne = new JoinDeadlineSweeper(deadlines, key -> {
+            if (key.equals(unknown)) {
+                throw new IllegalStateException("discovery does not know J");
+            }
+            sent.add(key);
+        }, Clock.fixed(NOW, ZoneOffset.UTC), 2);
+
+        assertThatThrownBy(failingOnOne::sweep).hasMessage("discovery does not know J");
+        assertThat(sent).containsExactlyInAnyOrderElementsOf(others);
+        assertThat(deadlines.dueBy(NOW, 10)).containsExactly(unknown);
+    }
 }
