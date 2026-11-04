@@ -11,6 +11,5 @@ target/
 # Local planning notes and increment summaries (not published)
 docs/
 
-# Local agent skills, not part of the project
 .agents/
 .claude/
