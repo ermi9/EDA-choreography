@@ -5,6 +5,7 @@ import com.eda.choreography.domain.compensation.CompensationPublisher;
 import com.eda.choreography.domain.compensation.CompensationRequest;
 import com.eda.choreography.domain.compensation.CompensationRunner;
 import com.eda.choreography.domain.compensation.CompensationTrigger;
+import com.eda.choreography.domain.join.ForkSkips;
 import com.eda.choreography.domain.join.JoinDeadlines;
 import com.eda.choreography.domain.join.JoinStateMachine;
 import com.eda.choreography.domain.join.JoinStateStore;
@@ -56,6 +57,9 @@ abstract class AbstractFlowIT extends AbstractInfraIT {
 
     @Autowired
     JoinDeadlines deadlines;
+
+    @Autowired
+    ForkSkips forks;
 
     @Autowired
     ConsumerFactory<String, ChoreographyMessage> consumerFactory;
@@ -117,7 +121,7 @@ abstract class AbstractFlowIT extends AbstractInfraIT {
     /** Starts a step together with a compensator that undoes it the given way. */
     void startStep(String stepId, StepAction action, NextSteps routes, CompensationAction undo) {
         start(containers.create(
-                new StepRunner(stepId, action, routes, publisher, compensations, serviceTable::isLive)));
+                new StepRunner(stepId, action, routes, publisher, compensations, serviceTable::isLive, forks)));
         startCompensator(stepId, undo);
     }
 
@@ -132,7 +136,7 @@ abstract class AbstractFlowIT extends AbstractInfraIT {
 
     JoinRunner joinRunner(String stepId, StepAction action, NextSteps routes, int branches, Duration timeout) {
         return new JoinRunner(
-                new StepRunner(stepId, action, routes, publisher, compensations, serviceTable::isLive),
+                new StepRunner(stepId, action, routes, publisher, compensations, serviceTable::isLive, forks),
                 branches, timeout, new JoinStateMachine(joinStore), deadlines, compensations, Clock.systemUTC());
     }
 

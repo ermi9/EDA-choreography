@@ -1,8 +1,11 @@
 package com.eda.choreography.domain.step;
 
 import com.eda.choreography.domain.compensation.CompensationTrigger;
+import com.eda.choreography.domain.join.ForkSkips;
+import com.eda.choreography.domain.join.JoinKey;
 import com.eda.choreography.domain.message.ChoreographyMessage;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.function.Predicate;
 
 /**
@@ -22,6 +25,11 @@ import java.util.function.Predicate;
  * <p>A step that has already run as often as its flow allows fails instead of running again, so
  * a loop whose way out never comes ends, and is undone like any other failure.
  *
+ * <p>Inside a fork, a step first asks whether the fork has already failed (see {@link ForkSkips}).
+ * If it has, the step does no work: it records itself as skipped and hands the instance straight
+ * to its join, which undoes it. A step inside a fork that fails marks the fork failed before it
+ * reports to the join, so its siblings stop as early as they can.
+ *
  * <p>The runner knows nothing about transport. An adapter delivers messages to
  * {@link #handle} and implements {@link MessagePublisher}.
  */
@@ -33,6 +41,7 @@ public final class StepRunner {
     private final MessagePublisher publisher;
     private final CompensationTrigger compensations;
     private final Predicate<String> takesWork;
+    private final ForkSkips forks;
 
     /** A runner that hands on to every service without asking whether it takes work. */
     public StepRunner(
@@ -45,6 +54,8 @@ public final class StepRunner {
     }
 
     /**
+     * A runner whose forks run every branch to its end.
+     *
      * @param takesWork whether a service may be handed work now, such as discovery reporting it live
      */
     public StepRunner(
@@ -54,6 +65,21 @@ public final class StepRunner {
             MessagePublisher publisher,
             CompensationTrigger compensations,
             Predicate<String> takesWork) {
+        this(stepId, action, nextSteps, publisher, compensations, takesWork, ForkSkips.NONE);
+    }
+
+    /**
+     * @param takesWork whether a service may be handed work now, such as discovery reporting it live
+     * @param forks     where a fork's failure is shared with its branches
+     */
+    public StepRunner(
+            String stepId,
+            StepAction action,
+            NextSteps nextSteps,
+            MessagePublisher publisher,
+            CompensationTrigger compensations,
+            Predicate<String> takesWork,
+            ForkSkips forks) {
         if (stepId == null || stepId.isBlank()) {
             throw new IllegalArgumentException("stepId must be non-blank");
         }
@@ -63,6 +89,7 @@ public final class StepRunner {
         this.publisher = Objects.requireNonNull(publisher, "publisher");
         this.compensations = Objects.requireNonNull(compensations, "compensations");
         this.takesWork = Objects.requireNonNull(takesWork, "takesWork");
+        this.forks = Objects.requireNonNull(forks, "forks");
     }
 
     /** The service this runner belongs to, which is also the step it runs when a message names none. */
@@ -76,6 +103,12 @@ public final class StepRunner {
      */
     public void handle(ChoreographyMessage incoming) {
         var step = stepOf(incoming);
+        var join = nextSteps.enclosingJoin(step, incoming);
+        if (join.isPresent() && forks.skips(forkOf(incoming, join.get()), incoming.entryIdFor(step))) {
+            var skipped = incoming.recordSkip(step, stepId);
+            publisher.publish(nextSteps.serviceOf(join.get(), skipped), skipped.addressedTo(join.get()));
+            return;
+        }
         if (incoming.runsOf(step) >= nextSteps.maxRuns(step, incoming)) {
             reportFailure(step, incoming.recordFailure(step, stepId));
             return;
@@ -138,14 +171,32 @@ public final class StepRunner {
         reportFailure(step, incoming.recordFailure(step, stepId));
     }
 
-    /** A failed step inside a fork goes on to its join; anywhere else the instance is undone. */
+    /**
+     * A failed step inside a fork marks the fork failed and goes on to its join; anywhere else the
+     * instance is undone. The mark comes first, so the siblings hear of it as soon as possible.
+     */
     private void reportFailure(String step, ChoreographyMessage failed) {
         var join = nextSteps.enclosingJoin(step, failed);
         if (join.isPresent()) {
+            forks.markFailed(forkOf(failed, join.get()));
             publisher.publish(nextSteps.serviceOf(join.get(), failed), failed.addressedTo(join.get()));
             return;
         }
         compensations.trigger(failed, failed.trace().get(failed.trace().size() - 1).id());
+    }
+
+    /** The join a step of this message's flow ends its branch at, if it is inside a fork. */
+    Optional<String> enclosingJoin(String step, ChoreographyMessage message) {
+        return nextSteps.enclosingJoin(step, message);
+    }
+
+    /** Marks the fork closed by {@code fork} failed, for a join that gives up on it. */
+    void markForkFailed(JoinKey fork) {
+        forks.markFailed(fork);
+    }
+
+    private static JoinKey forkOf(ChoreographyMessage message, String join) {
+        return new JoinKey(message.correlationId(), join);
     }
 
     private String stepOf(ChoreographyMessage incoming) {

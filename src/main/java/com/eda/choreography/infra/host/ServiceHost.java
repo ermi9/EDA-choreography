@@ -3,6 +3,7 @@ package com.eda.choreography.infra.host;
 import com.eda.choreography.domain.compensation.CompensationPublisher;
 import com.eda.choreography.domain.compensation.CompensationRunner;
 import com.eda.choreography.domain.compensation.CompensationTrigger;
+import com.eda.choreography.domain.join.ForkSkips;
 import com.eda.choreography.domain.join.JoinDeadlines;
 import com.eda.choreography.domain.join.JoinStateMachine;
 import com.eda.choreography.domain.plan.Conditions;
@@ -58,6 +59,7 @@ public class ServiceHost implements SmartLifecycle {
             CompensationTrigger compensations,
             JoinStateMachine joins,
             JoinDeadlines deadlines,
+            ForkSkips forks,
             ResolutionSource catalog,
             DiscoveryRegistration registration) {}
 
@@ -81,7 +83,8 @@ public class ServiceHost implements SmartLifecycle {
         var waits = new PlannedJoinWaits(dependencies.plans(), dependencies.defaultJoinTimeout());
         for (var service : services) {
             var step = new StepRunner(service, new DemoAction(service), routes,
-                    dependencies.publisher(), dependencies.compensations(), dependencies.catalog()::isLive);
+                    dependencies.publisher(), dependencies.compensations(), dependencies.catalog()::isLive,
+                    dependencies.forks());
             var join = new JoinRunner(step, waits, dependencies.joins(), dependencies.deadlines(),
                     dependencies.compensations(), Clock.systemUTC());
             containers.add(dependencies.containers().create(new ServiceRunner(step, join, waits::isJoin)));

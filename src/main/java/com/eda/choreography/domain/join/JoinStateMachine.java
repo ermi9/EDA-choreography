@@ -7,7 +7,9 @@ import java.util.Optional;
  * Applies branch arrivals to joins and decides when a join fires.
  *
  * <p>A join fires exactly once: when the set of distinct arrived branches first reaches
- * {@code expectedBranches}. Duplicates, before or after firing, change nothing.
+ * {@code expectedBranches}. A branch that arrives again never counts twice. Until the join fires,
+ * a copy that carries entries the stored one lacks is merged into it, so the join's view of a
+ * branch is everything any copy of it did; once the join has fired or timed out, nothing changes.
  *
  * <p>A join that waits too long can be timed out instead. It then never fires, and a branch
  * that only reaches it afterwards is reported as {@link Decision#LATE}.
@@ -36,7 +38,14 @@ public final class JoinStateMachine {
                     + arrival.expectedBranches());
         }
         if (state.arrivedBranches().contains(arrival.branchId())) {
-            return new JoinOutcome(Decision.DUPLICATE, state);
+            if (state.status() != JoinState.Status.OPEN || arrival.message() == null) {
+                return new JoinOutcome(Decision.DUPLICATE, state);
+            }
+            var merged = state.withCopy(arrival.branchId(), arrival.message());
+            if (merged != state) {
+                store.save(merged);
+            }
+            return new JoinOutcome(Decision.DUPLICATE, merged);
         }
         if (state.status() == JoinState.Status.TIMED_OUT) {
             return new JoinOutcome(Decision.LATE, state);

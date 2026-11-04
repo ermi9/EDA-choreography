@@ -2,6 +2,7 @@ package com.eda.choreography.infra.host;
 
 import com.eda.choreography.domain.compensation.CompensationPublisher;
 import com.eda.choreography.domain.compensation.CompensationTrigger;
+import com.eda.choreography.domain.join.ForkSkips;
 import com.eda.choreography.domain.join.JoinDeadlines;
 import com.eda.choreography.domain.join.JoinStateMachine;
 import com.eda.choreography.domain.plan.Conditions;
@@ -44,11 +45,12 @@ public class HostConfig {
             CompensationTrigger compensations,
             JoinStateMachine joins,
             JoinDeadlines deadlines,
+            ForkSkips forks,
             ServiceTable catalog,
             DiscoveryRegistration registration) {
         var hosted = services.stream().map(String::strip).filter(service -> !service.isEmpty()).toList();
         return new ServiceHost(hosted, new ServiceHost.Dependencies(bootstrapServers, partitions, containers, plans,
                 conditions, defaultJoinTimeout, defaultMaxRuns, publisher, compensationPublisher, compensations, joins, deadlines,
-                catalog, registration));
+                forks, catalog, registration));
     }
 }

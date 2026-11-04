@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.eda.choreography.domain.join.JoinOutcome.Decision;
 import com.eda.choreography.domain.message.ChoreographyMessage;
+import com.eda.choreography.domain.trace.TraceEntry;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -207,6 +208,52 @@ class JoinStateMachineTest {
         machine.timeOut(JOIN);
 
         assertThat(arrive("B", 2).decision()).isEqualTo(Decision.DUPLICATE);
+    }
+
+    @Test
+    void aSecondCopyOfABranchAddsWhatItRanBeforeTheJoinFires() {
+        // One copy of branch B was skipped at B2; the other ran B2 before a redelivery.
+        var reached = ChoreographyMessage.start("corr-1", "flow", Map.of()).recordStep("A", Map.of()).recordStep("B1", Map.of());
+        var skipped = reached.recordSkip("B2", "B2");
+        var ran = reached.recordStep("B2", Map.of("done", true));
+        machine.arrive(new BranchArrival(JOIN, "B", 2, skipped));
+
+        var copy = machine.arrive(new BranchArrival(JOIN, "B", 2, ran));
+
+        assertThat(copy.decision()).isEqualTo(Decision.DUPLICATE);
+        assertThat(copy.state().arrivedBranches()).containsExactly("B");
+        assertThat(copy.state().branchMessages().get("B")).isEqualTo(ChoreographyMessage.merge(List.of(skipped, ran)));
+        var fired = machine.arrive(new BranchArrival(JOIN, "C", 2, null));
+        assertThat(fired.fired()).isTrue();
+        assertThat(fired.state().branchMessages().get("B").trace())
+                .extracting(TraceEntry::outcome)
+                .contains(TraceEntry.Outcome.COMPLETED, TraceEntry.Outcome.SKIPPED);
+    }
+
+    @Test
+    void aRedeliveredCopyThatAddsNothingLeavesTheStoredBranchAsItWas() {
+        var store = new InMemoryJoinStateStore();
+        var counting = new JoinStateMachine(store);
+        var branch = ChoreographyMessage.start("corr-1", "flow", Map.of()).recordStep("A", Map.of()).recordStep("B", Map.of());
+        counting.arrive(new BranchArrival(JOIN, "B", 2, branch));
+        var stored = store.find(JOIN).orElseThrow();
+
+        var repeat = counting.arrive(new BranchArrival(JOIN, "B", 2, branch));
+
+        assertThat(repeat.state()).isSameAs(stored);
+        assertThat(store.find(JOIN)).contains(stored);
+    }
+
+    @Test
+    void aCopyThatArrivesAfterTheJoinFiredChangesNothing() {
+        var reached = ChoreographyMessage.start("corr-1", "flow", Map.of()).recordStep("A", Map.of());
+        machine.arrive(new BranchArrival(JOIN, "B", 2, reached.recordSkip("B1", "B1")));
+        var fired = machine.arrive(new BranchArrival(JOIN, "C", 2, reached.recordStep("C1", Map.of())));
+
+        var copy = machine.arrive(new BranchArrival(JOIN, "B", 2, reached.recordStep("B1", Map.of())));
+
+        assertThat(copy.decision()).isEqualTo(Decision.DUPLICATE);
+        assertThat(copy.state()).isEqualTo(fired.state());
     }
 
     private JoinOutcome arrive(String branchId, int expected) {

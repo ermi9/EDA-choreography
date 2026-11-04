@@ -33,10 +33,14 @@ public record TraceEntry(
      *
      * <p>Scope boundary: steps are assumed atomic, so {@link #FAILED} means no side effect was
      * committed. A step that fails after a partial side effect is outside this model.
+     *
+     * <p>{@link #SKIPPED} means the step never ran: it was inside a fork that had already failed,
+     * so it did no work and handed the instance straight to the join.
      */
     public enum Outcome {
         COMPLETED,
-        FAILED
+        FAILED,
+        SKIPPED
     }
 
     public TraceEntry {
@@ -63,6 +67,11 @@ public record TraceEntry(
     /** A failed step, of the service it is named after. */
     public static TraceEntry failed(String id, String correlationId, String stepId, String... parents) {
         return new TraceEntry(id, Set.of(parents), correlationId, stepId, stepId, Outcome.FAILED, null);
+    }
+
+    /** A step that was skipped, of the service it is named after. */
+    public static TraceEntry skipped(String id, String correlationId, String stepId, String... parents) {
+        return new TraceEntry(id, Set.of(parents), correlationId, stepId, stepId, Outcome.SKIPPED, null);
     }
 
     /** This entry, run by the given service. */

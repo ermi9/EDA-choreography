@@ -35,17 +35,20 @@
   td, th { text-align: left; padding: 4px; border-bottom: 1px solid var(--line); }
   .FAILED { color: var(--bad); font-weight: 600; }
   .UNDONE { color: var(--undo); font-weight: 600; }
-  :root { --undo: #b54708; }
+  .SKIPPED { color: var(--skip); }
+  :root { --undo: #b54708; --skip: #98a2b3; }
   #scenario-note { margin-top: 6px; }
   ol.stages { margin: 6px 0 0; padding-left: 20px; font-size: 13px; }
   ol.stages li { margin: 2px 0; }
   .djs-element.run-done .djs-visual > :first-child { stroke: var(--ok) !important; fill: #e7f6ef !important; }
   .djs-element.run-failed .djs-visual > :first-child { stroke: var(--bad) !important; fill: #fdecea !important; }
   .djs-element.run-undone .djs-visual > :first-child { stroke: var(--undo) !important; fill: #fff4e5 !important; stroke-dasharray: 6 3; }
+  .djs-element.run-skipped .djs-visual > :first-child { stroke: var(--skip) !important; fill: #f2f4f7 !important; stroke-dasharray: 2 3; }
   .badge { font: 600 11px/1 system-ui, sans-serif; padding: 3px 6px; border-radius: 10px; color: #fff; white-space: nowrap; }
   .badge.done { background: var(--ok); }
   .badge.failed { background: var(--bad); }
   .badge.undone { background: var(--undo); }
+  .badge.skipped { background: var(--skip); }
 </style>
 </head>
 <body>
@@ -367,6 +370,8 @@ function showRun(run, compensations) {
         .map(at => at.stage + (rounds.length > 1 ? ' (' + at.round + ')' : ''));
     if (runs.some(entry => entry.outcome === 'FAILED')) { paint(step, 'failed', '✗ failed' + times); }
     else if (undone.length) { paint(step, 'undone', '↶ undone · stage ' + undone.join(', ') + times); }
+    // Skipped only when no run of the step did any work: its fork had already failed.
+    else if (runs.every(entry => entry.outcome === 'SKIPPED')) { paint(step, 'skipped', '⤼ skipped' + times); }
     else { paint(step, 'done', '✓ done' + times); }
   });
 

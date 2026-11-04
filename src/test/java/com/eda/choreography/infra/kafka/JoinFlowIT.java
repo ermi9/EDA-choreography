@@ -51,7 +51,7 @@ class JoinFlowIT extends AbstractFlowIT {
     }
 
     @Test
-    void aJoinThatWaitsTooLongUndoesWhatArrivedAndALateBranchUndoesOnlyItsOwnSteps() throws Exception {
+    void aJoinThatWaitsTooLongUndoesWhatArrivedAndABranchStillOnItsWayIsSkipped() throws Exception {
         var a = unique("a");
         var b = unique("b");
         var c = unique("c");
@@ -71,12 +71,17 @@ class JoinFlowIT extends AbstractFlowIT {
             assertThat(undone).containsExactly(b, a);
             assertThat(timedOut.trace()).extracting(TraceEntry::stepId).containsExactlyInAnyOrder(a, b);
 
-            startStep(c, message -> Map.of("slot", "monday"), routes);
+            var slots = new AtomicInteger();
+            startStep(c, message -> Map.of("slot", slots.incrementAndGet()), routes);
             var late = await(outcomes, compensatedTopic, correlationId, WAIT);
 
             assertThat(late.trace()).extracting(TraceEntry::stepId).containsExactlyInAnyOrder(a, c);
-            // a was undone by the timeout already; the late branch only undoes c.
-            assertThat(undone).containsExactly(b, a, c);
+            // The timeout marked the fork failed, so c is skipped instead of run, and a was
+            // undone by the timeout already: the late branch has nothing left to undo.
+            assertThat(late.trace()).filteredOn(entry -> entry.stepId().equals(c))
+                    .extracting(TraceEntry::outcome).containsExactly(TraceEntry.Outcome.SKIPPED);
+            assertThat(slots).hasValue(0);
+            assertThat(undone).containsExactly(b, a);
             assertThat(more(outcomes, completedTopic, List.of(correlationId), Duration.ofSeconds(1))).isEmpty();
         }
     }

@@ -45,6 +45,47 @@ class ChoreographyMessageTest {
     }
 
     @Test
+    void aSkippedStepIsChainedLikeAnyOtherButHasNothingToUndoAndNoResult() {
+        var reserved = ChoreographyMessage.start(CORRELATION, FLOW, Map.of()).recordStep("A", RESERVED);
+
+        var skipped = reserved.recordSkip("B", "pricing");
+
+        var entry = skipped.trace().get(1);
+        assertThat(entry.outcome()).isEqualTo(TraceEntry.Outcome.SKIPPED);
+        assertThat(entry.parents()).containsExactly(reserved.trace().get(0).id());
+        assertThat(entry.service()).isEqualTo("pricing");
+        assertThat(entry.needsCompensation()).isFalse();
+        assertThat(entry.resultRef()).isNull();
+        assertThat(skipped.results()).isEqualTo(reserved.results());
+        assertThat(skipped.hasSkipped()).isTrue();
+        assertThat(skipped.hasFailed()).isFalse();
+        assertThat(reserved.hasSkipped()).isFalse();
+    }
+
+    @Test
+    void completingFailingAndSkippingTheSameStepGiveThreeDifferentIds() {
+        // After redeliveries one step can end up all three ways on the same message.
+        var reserved = ChoreographyMessage.start(CORRELATION, FLOW, Map.of()).recordStep("A", RESERVED);
+
+        var completed = reserved.recordStep("B", PRICED).trace().get(1).id();
+        var failed = reserved.recordFailure("B").trace().get(1).id();
+        var skipped = reserved.recordSkip("B", "B").trace().get(1).id();
+
+        assertThat(List.of(completed, failed, skipped)).doesNotHaveDuplicates();
+        assertThat(reserved.recordSkip("B", "B").trace().get(1).id()).isEqualTo(skipped);
+    }
+
+    @Test
+    void theEntryIdForAStepIsTheIdItsCompletedEntryGets() {
+        var reserved = ChoreographyMessage.start(CORRELATION, FLOW, Map.of()).recordStep("A", RESERVED);
+
+        var priced = reserved.recordStep("B", PRICED);
+
+        assertThat(reserved.entryIdFor("B")).isEqualTo(priced.trace().get(1).id());
+        assertThat(priced.entryIdFor("B")).isNotEqualTo(reserved.entryIdFor("B"));
+    }
+
+    @Test
     void eachStepIsChainedToTheStepThatTriggeredIt() {
         var message = ChoreographyMessage.start(CORRELATION, FLOW, Map.of())
                 .recordStep("A", RESERVED)

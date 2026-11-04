@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.eda.choreography.domain.compensation.CompensationTrigger;
+import com.eda.choreography.domain.join.InMemoryForkSkips;
 import com.eda.choreography.domain.join.InMemoryJoinDeadlines;
 import com.eda.choreography.domain.join.InMemoryJoinStateStore;
 import com.eda.choreography.domain.join.JoinKey;
@@ -16,6 +17,7 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.stream.Collectors;
 import org.junit.jupiter.api.Test;
 
@@ -208,6 +210,137 @@ class JoinRunnerTest {
         var unmerged = ChoreographyMessage.merge(List.of(FROM_B, FROM_C));
 
         assertThatThrownBy(() -> join.handle(unmerged)).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    // Forks whose branches stop early once one of them has failed.
+
+    @Test
+    void aBranchThatReachesTheJoinTwiceEndingDifferentlyCountsOnce() {
+        // B ran, but a redelivered copy of its message found the fork failed and skipped it.
+        var forkAware = forkAwareJoin();
+        forkAware.handle(FROM_B);
+        forkAware.handle(FORKED.recordSkip("B", "B"));
+        assertThat(publisher.sent).isEmpty();
+        assertThat(compensations.requests).isEmpty();
+
+        forkAware.handle(FROM_C);
+
+        assertThat(compensations.requests).extracting(RecordingCompensations.Sent::stepId)
+                .containsExactlyInAnyOrder("B", "C");
+    }
+
+    @Test
+    void aBranchIsKnownByItsFirstStepEvenWhenALoopRanThatStepAgain() {
+        var forkAware = forkAwareJoin();
+        var twice = FORKED.recordStep("B", Map.of("round", 1)).recordStep("B", Map.of("round", 2));
+        forkAware.handle(twice);
+
+        forkAware.handle(FORKED.recordStep("B", Map.of("round", 1)).recordSkip("B", "B"));
+
+        assertThat(compensations.requests).isEmpty();
+        assertThat(publisher.sent).isEmpty();
+    }
+
+    @Test
+    void aSkippedBranchMakesTheJoinUndoTheInstanceEvenWhenNoStepFailed() {
+        // The step that marked the fork failed was redelivered and then succeeded.
+        var forkAware = forkAwareJoin();
+        var skippedC = FORKED.recordSkip("C", "C");
+        forkAware.handle(FROM_B);
+
+        forkAware.handle(skippedC);
+
+        assertThat(publisher.sent).isEmpty();
+        assertThat(compensations.requests).singleElement().satisfies(sent -> {
+            assertThat(sent.stepId()).isEqualTo("B");
+            assertThat(sent.request().runId()).isEqualTo("join-failed:J");
+            assertThat(sent.request().instance()).isEqualTo(ChoreographyMessage.merge(List.of(FROM_B, skippedC)));
+        });
+    }
+
+    @Test
+    void aCopyThatArrivesAfterTheJoinFiredUndoesOnlyTheStepsTheJoinNeverSaw() {
+        var forkAware = forkAwareJoin();
+        var skippedB = FORKED.recordSkip("B", "B");
+        forkAware.handle(skippedB);
+        forkAware.handle(FROM_C);
+        compensations.requests.clear();
+
+        forkAware.handle(FROM_B);
+
+        var bEntry = FROM_B.trace().get(1);
+        var seen = ChoreographyMessage.merge(List.of(skippedB, FROM_C)).trace().stream()
+                .map(TraceEntry::id).collect(Collectors.toSet());
+        assertThat(compensations.requests).filteredOn(sent -> sent.request().runId().equals("join-copy:" + bEntry.id()))
+                .singleElement().satisfies(sent -> {
+                    assertThat(sent.stepId()).isEqualTo("B");
+                    assertThat(sent.request().entryId()).isEqualTo(bEntry.id());
+                    assertThat(sent.request().instance()).isEqualTo(FROM_B);
+                    assertThat(sent.request().alreadyUndone()).isEqualTo(seen);
+                });
+        assertThat(publisher.sent).isEmpty();
+    }
+
+    @Test
+    void aCopyOfABranchBeforeTheJoinFiresIsMergedSoItsWorkIsUndoneWithTheRest() {
+        var forkAware = forkAwareJoin();
+        var reachedB = FORKED.recordStep("B", Map.of("amount", 30));
+        forkAware.handle(reachedB.recordSkip("B2", "B2"));
+        forkAware.handle(reachedB.recordStep("B2", Map.of("receipt", 7)));
+
+        forkAware.handle(FROM_C);
+
+        var b2 = reachedB.recordStep("B2", Map.of("receipt", 7)).trace().get(2);
+        assertThat(compensations.requests).extracting(sent -> sent.request().entryId())
+                .containsExactlyInAnyOrder(b2.id(), FROM_C.trace().get(1).id());
+    }
+
+    @Test
+    void aFailedBranchMarksTheForkFailedInCaseItsOwnStepCouldNot() {
+        forkAwareJoin().handle(FORKED.recordFailure("B"));
+
+        assertThat(forks.skips(KEY, "C:not-yet-run")).isTrue();
+    }
+
+    @Test
+    void aTimeoutMarksTheForkFailedSoBranchesStillOnTheirWayAreSkipped() {
+        var forkAware = forkAwareJoin();
+        forkAware.handle(FROM_B);
+
+        forkAware.timeOut("order-42");
+
+        assertThat(forks.skips(KEY, "C:not-yet-run")).isTrue();
+    }
+
+    @Test
+    void aJoinThatFiredWithoutFailureLeavesTheForkUnmarked() {
+        var forkAware = forkAwareJoin();
+        forkAware.handle(FROM_B);
+        forkAware.handle(FROM_C);
+        forkAware.timeOut("order-42");
+
+        assertThat(forks.skips(KEY, "C:not-yet-run")).isFalse();
+    }
+
+    private final InMemoryForkSkips forks = new InMemoryForkSkips();
+
+    /** A join that knows from its routing which steps are inside its fork, and shares the fork's failure. */
+    private JoinRunner forkAwareJoin() {
+        var routes = new NextSteps() {
+            @Override
+            public List<String> after(String stepId, ChoreographyMessage message) {
+                return List.of("D");
+            }
+
+            @Override
+            public Optional<String> enclosingJoin(String stepId) {
+                return List.of("B", "B2", "C").contains(stepId) ? Optional.of("J") : Optional.empty();
+            }
+        };
+        return new JoinRunner(
+                new StepRunner("J", message -> JOINED, routes, publisher, trigger, service -> true, forks),
+                2, TIMEOUT, new JoinStateMachine(new InMemoryJoinStateStore()), deadlines, trigger,
+                Clock.fixed(NOW, ZoneOffset.UTC));
     }
 
     /** What a fresh join hands on after the two branches arrive in the given order. */

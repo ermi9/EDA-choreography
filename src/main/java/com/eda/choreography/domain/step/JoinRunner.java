@@ -12,10 +12,12 @@ import com.eda.choreography.domain.trace.TraceEntry;
 import com.eda.choreography.domain.trace.TraceGraph;
 import java.time.Clock;
 import java.time.Duration;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.function.Consumer;
+import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
 /**
@@ -23,8 +25,16 @@ import java.util.stream.Collectors;
  * on their merged message, when the last one arrives. There is no coordinator; whichever branch
  * arrives first opens the join, and the join's state is all the service remembers.
  *
- * <p>When the join fires it either runs its step or, if any branch failed, undoes the instance.
- * The merged trace holds every branch, so the compensation reaches the successful branches too.
+ * <p>When the join fires it either runs its step or, if any branch failed or was skipped, undoes
+ * the instance. The merged trace holds every branch, so the compensation reaches the successful
+ * branches too. A skipped step means its fork was marked failed, so the instance is undone even
+ * when the failure that marked it was later retried into a success: a branch cut short must
+ * never let the flow carry on without its work.
+ *
+ * <p>A branch is known by the step it started with after the fork, not by its last entry. One
+ * branch can reach the join more than once, ending differently each time (completed, failed or
+ * skipped, after a redelivery), and must still count once. A copy that arrives after the join
+ * fired or timed out with entries the join never saw has those entries undone on their own.
  *
  * <p>A join that waits too long is timed out. The first branch to arrive sets the join's
  * deadline; when it passes, a sweeper has {@link #timeOut} called for the instance. The branches
@@ -107,24 +117,31 @@ public final class JoinRunner {
     }
 
     private void arrive(ChoreographyMessage branch, Consumer<ChoreographyMessage> whenFired) {
-        var branchId = lastEntryOf(branch).id();
+        var leaf = lastEntryOf(branch);
         var key = new JoinKey(branch.correlationId(), stepId());
+        if (branch.hasFailed()) {
+            // The failed step marked the fork already, unless it could not reach the flag.
+            step.markForkFailed(key);
+        }
         var wait = waits.forJoin(branch.flowName(), stepId());
-        var outcome = joins.arrive(new BranchArrival(key, branchId, wait.expectedBranches(), branch));
+        var outcome = joins.arrive(new BranchArrival(key, branchOf(branch, leaf), wait.expectedBranches(), branch));
         if (outcome.decision() == Decision.LATE) {
-            compensations.trigger(branch, "join-late:" + branchId, undoneByTimeout(outcome.state()));
+            compensations.trigger(branch, "join-late:" + leaf.id(), undoneByTimeout(outcome.state()));
             return;
         }
         if (outcome.state().status() == JoinState.Status.OPEN) {
             deadlines.setIfAbsent(key, clock.instant().plus(wait.timeout()));
             return;
         }
+        if (outcome.decision() == Decision.DUPLICATE) {
+            undoWhatTheJoinNeverSaw(branch, leaf, outcome.state());
+        }
         if (!outcome.state().fired()) {
             return;
         }
         deadlines.remove(key);
         var merged = merge(outcome.state());
-        if (merged.hasFailed()) {
+        if (merged.hasFailed() || merged.hasSkipped()) {
             compensations.trigger(merged, "join-failed:" + stepId());
             return;
         }
@@ -137,9 +154,52 @@ public final class JoinRunner {
      * which is harmless, so a caller that crashed half way can simply call again.
      */
     public void timeOut(String correlationId) {
-        joins.timeOut(new JoinKey(correlationId, stepId()))
-                .filter(state -> !state.branchMessages().isEmpty())
-                .ifPresent(state -> compensations.trigger(merge(state), "join-timeout:" + stepId()));
+        var key = new JoinKey(correlationId, stepId());
+        joins.timeOut(key).ifPresent(state -> {
+            // The branches still on their way are skipped from here on instead of arriving late.
+            step.markForkFailed(key);
+            if (!state.branchMessages().isEmpty()) {
+                compensations.trigger(merge(state), "join-timeout:" + stepId());
+            }
+        });
+    }
+
+    /**
+     * Undoes the steps that a copy of an arrived branch ran but the join's merged trace lacks,
+     * because the copy came after the join fired or timed out. The rest of the trace is left out:
+     * the join already undid it, or carried it on. The run is named after the copy's last entry,
+     * so a redelivered copy sends the same requests again.
+     */
+    private void undoWhatTheJoinNeverSaw(ChoreographyMessage copy, TraceEntry leaf, JoinState state) {
+        if (state.branchMessages().isEmpty()) {
+            return;
+        }
+        var seen = merge(state).trace().stream().map(TraceEntry::id).collect(Collectors.toUnmodifiableSet());
+        var unseenWork = copy.trace().stream()
+                .anyMatch(entry -> !seen.contains(entry.id()) && entry.needsCompensation());
+        if (unseenWork) {
+            compensations.trigger(copy, "join-copy:" + leaf.id(), seen);
+        }
+    }
+
+    /**
+     * The step a branch started with after the fork: the branch's one entry whose step is inside
+     * this join's fork while none of its parents' steps are. It stays the same however the branch
+     * ended, and a loop inside the branch cannot repeat it. Routing that cannot say which steps
+     * are inside the fork leaves only the branch's last entry to go by.
+     */
+    private String branchOf(ChoreographyMessage branch, TraceEntry leaf) {
+        var trace = TraceGraph.of(branch.trace());
+        // Asked once per step: the plan may be read from a store on every lookup.
+        var inside = new HashMap<String, Boolean>();
+        Predicate<TraceEntry> insideThisFork = entry -> inside.computeIfAbsent(entry.stepId(),
+                stepId -> step.enclosingJoin(stepId, branch).filter(stepId()::equals).isPresent());
+        var firstSteps = branch.trace().stream()
+                .filter(insideThisFork)
+                .filter(entry -> trace.parentsOf(entry.id()).stream().noneMatch(insideThisFork))
+                .map(TraceEntry::stepId)
+                .collect(Collectors.toUnmodifiableSet());
+        return firstSteps.size() == 1 ? "step:" + firstSteps.iterator().next() : leaf.id();
     }
 
     /**

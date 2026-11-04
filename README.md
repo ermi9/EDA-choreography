@@ -141,6 +141,42 @@ flowchart LR
     J --> E[E]
 ```
 
+### When a branch fails
+
+A failed step inside a fork does not undo anything itself: it cannot see its siblings, so its
+failure travels to the join like any other branch end. Before sending it there, the step marks
+the fork as failed in Redis. Every step inside a fork checks that mark before it does any work.
+If the fork has failed, the step records itself as `SKIPPED` and goes straight to the join, so a
+sibling branch stops starting new steps instead of running them only to have them undone.
+
+The join still waits for every branch and then undoes the merged trace in reverse topological
+order, so skipping changes how much work is done, never the order it is undone in.
+
+```mermaid
+flowchart LR
+    F[reserve] -->|fork| C1[charge]
+    F -->|fork| K["courier ✗<br/>marks the fork failed"]
+    C1 --> C2["fraud-check<br/>skipped"]
+    C2 -.->|straight to the join| J{{ship}}
+    K --> J
+```
+
+Three rules keep this safe:
+
+- **A step's choice is made once.** Whether a run of a step inside a fork runs or is skipped is
+  stored the first time it is asked, keyed by the entry it would record. A redelivered message
+  repeats that choice, so a step that may already have done its work is never skipped and
+  forgotten.
+- **A branch is known by its first step after the fork**, not by its last entry. One branch can
+  reach the join more than once, ending differently each time after a redelivery, and still
+  counts once. Copies that arrive before the join fires are merged; anything a copy adds after
+  it fired is undone on its own.
+- **A skipped step means the instance is undone**, like a failed one. The mark is set before the
+  failure is published, and a failure retried into a success does not unset it, so the join never
+  lets a flow carry on without a branch's work.
+
+The mark only saves work. If Redis cannot be reached, the step runs, as it would without it.
+
 ## From diagram to running choreography
 
 Authoring and execution are separated by a stored `.bpmn` file and a flow name.
@@ -190,8 +226,8 @@ flowchart LR
 - generating or deploying new service implementations from a diagram;
 - partial (N-of-M) joins;
 - nested or dynamic forks;
-- cancelling a sibling branch that is still in flight. It is allowed to finish and is then
-  compensated.
+- interrupting a sibling step that is already running when its fork fails. It finishes and is
+  then compensated; only the steps its branch has not started yet are skipped.
 
 ## How I build it
 

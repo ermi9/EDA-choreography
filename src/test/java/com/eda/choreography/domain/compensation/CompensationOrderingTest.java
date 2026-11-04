@@ -150,12 +150,55 @@ class CompensationOrderingTest {
         assertThat(orderOf(failed("A")).isEmpty()).isTrue();
     }
 
+    // Branches cut short because their fork had already failed.
+
+    @Test
+    void aBranchSkippedAtItsFirstStepLeavesOnlyItsSiblingsThenTheForkingStep() {
+        var a = done("A");
+        var b = failed("B", "A");
+        var c = skipped("C", "A");
+        var d = done("D", "A");
+
+        var order = orderOf(a, b, c, d);
+
+        assertThat(order.stages()).containsExactly(Set.of(d), Set.of(a));
+    }
+
+    @Test
+    void aBranchSkippedHalfWayUndoesWhatItRanBeforeTheSkip() {
+        var a = done("A");
+        var b = failed("B", "A");
+        var c1 = done("C1", "A");
+        var c2 = skipped("C2", "C1");
+
+        var order = orderOf(a, b, c1, c2);
+
+        assertThat(order.stages()).containsExactly(Set.of(c1), Set.of(a));
+    }
+
+    @Test
+    void aLoopInsideABranchCutShortByASkipUndoesItsRoundsLatestFirst() {
+        var a = done("A");
+        var b = failed("B", "A");
+        var round1 = done("R1", "A");
+        var round2 = done("R2", "R1");
+        var round3 = skipped("R3", "R2");
+
+        var order = orderOf(a, b, round1, round2, round3);
+
+        assertThat(order.stages()).containsExactly(Set.of(round2), Set.of(round1), Set.of(a));
+    }
+
     private static TraceEntry done(String id, String... parents) {
         return TraceEntry.completed(id, CORRELATION, "svc-" + id, "result-" + id, parents);
     }
 
     private static TraceEntry failed(String id, String... parents) {
         return TraceEntry.failed(id, CORRELATION, "svc-" + id, parents);
+    }
+
+    private static TraceEntry skipped(String id, String... parents) {
+        return TraceEntry.skipped(id, CORRELATION, "svc-" + id, parents);
     }
 
     /** Orders the trace and checks the general invariant on the result before returning it. */

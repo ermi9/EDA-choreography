@@ -133,6 +133,31 @@ public record ChoreographyMessage(
     }
 
     /**
+     * This message with a skipped step appended: the step was inside a fork that had already
+     * failed, so it did no work. Like a failed entry it has no result and nothing to undo, and it
+     * tells the join that the branch did not run to its end.
+     *
+     * <p>The id is derived from yet another name, so a skipped entry never collides with a
+     * completed or failed entry of the same step.
+     */
+    public ChoreographyMessage recordSkip(String stepId, String service) {
+        var parents = currentLeafIds();
+        var id = entryId(stepId, parents, "|skipped");
+        var nextTrace = new ArrayList<>(trace);
+        nextTrace.add(TraceEntry.skipped(id, correlationId, stepId, parents.toArray(String[]::new)).runBy(service));
+        return new ChoreographyMessage(correlationId, flowName, input, nextTrace, results, null);
+    }
+
+    /**
+     * The id the given step's entry gets if the step completes on this message. It names this
+     * one run of the step: the same message always gives the same id, and a loop's next round
+     * gives a new one.
+     */
+    public String entryIdFor(String stepId) {
+        return entryId(stepId, currentLeafIds(), "");
+    }
+
+    /**
      * The message a join continues with: the union of its branches' traces and results. The
      * branches share their history up to the fork, and those entries are kept once. The trace
      * is ordered by entry id, so the merge does not depend on the order branches arrived in.
@@ -175,6 +200,11 @@ public record ChoreographyMessage(
     /** Whether any step of this instance has failed. */
     public boolean hasFailed() {
         return trace.stream().anyMatch(entry -> entry.outcome() == TraceEntry.Outcome.FAILED);
+    }
+
+    /** Whether any step of this instance was skipped because its fork had failed. */
+    public boolean hasSkipped() {
+        return trace.stream().anyMatch(entry -> entry.outcome() == TraceEntry.Outcome.SKIPPED);
     }
 
     /** The result of the given step, if it ran. Meant for linear paths, where a step runs at most once. */

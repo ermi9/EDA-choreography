@@ -1,10 +1,13 @@
 package com.eda.choreography.domain.join;
 
 import com.eda.choreography.domain.message.ChoreographyMessage;
+import com.eda.choreography.domain.trace.TraceEntry;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * The accumulated state of one join.
@@ -102,6 +105,25 @@ public record JoinState(
             messages.putIfAbsent(branchId, message);
         }
         return new JoinState(key, expectedBranches, arrived, status, messages);
+    }
+
+    /**
+     * This state with another copy of a branch that already arrived. The copy's entries the
+     * stored message lacks are merged into it, so a step that one copy ran is undone even if the
+     * other copy arrived first. A copy that adds nothing leaves the state as it is.
+     */
+    JoinState withCopy(String branchId, ChoreographyMessage copy) {
+        var stored = branchMessages.get(branchId);
+        if (stored == null) {
+            return withArrival(branchId, copy);
+        }
+        var known = stored.trace().stream().map(TraceEntry::id).collect(Collectors.toSet());
+        if (copy.trace().stream().allMatch(entry -> known.contains(entry.id()))) {
+            return this;
+        }
+        var messages = new HashMap<>(branchMessages);
+        messages.put(branchId, ChoreographyMessage.merge(List.of(stored, copy)));
+        return new JoinState(key, expectedBranches, arrivedBranches, status, messages);
     }
 
     JoinState markTimedOut() {

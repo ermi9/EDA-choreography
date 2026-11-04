@@ -5,7 +5,12 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.eda.choreography.domain.compensation.CompensationRequest;
 import com.eda.choreography.domain.compensation.CompensationTrigger;
+import com.eda.choreography.domain.join.ForkSkips;
+import com.eda.choreography.domain.join.InMemoryForkSkips;
+import com.eda.choreography.domain.join.JoinKey;
 import com.eda.choreography.domain.message.ChoreographyMessage;
+import com.eda.choreography.domain.trace.TraceEntry;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -289,6 +294,137 @@ class StepRunnerTest {
         assertThat(publisher.sent).extracting(RecordingPublisher.Sent::stepId).containsExactly("B", "J");
         assertThat(publisher.sent.get(0).message()).isEqualTo(reserved.addressedTo("B"));
         assertThat(publisher.sent.get(1).message()).isEqualTo(reserved.recordFailure("C").addressedTo("J"));
+    }
+
+    // Steps inside a fork stop once a sibling branch has failed.
+
+    /** A forks into B and C; B hands on to B2; B2 and C end at the join J. */
+    private static final NextSteps FORK = new NextSteps() {
+        @Override
+        public List<String> after(String stepId, ChoreographyMessage message) {
+            return switch (stepId) {
+                case "A" -> List.of("B", "C");
+                case "B" -> List.of("B2");
+                default -> List.of("J");
+            };
+        }
+
+        @Override
+        public Optional<String> enclosingJoin(String stepId) {
+            return List.of("B", "B2", "C").contains(stepId) ? Optional.of("J") : Optional.empty();
+        }
+    };
+    private static final JoinKey FORK_KEY = new JoinKey("order-42", "J");
+    private static final ChoreographyMessage AT_B2 = ChoreographyMessage.start("order-42", "checkout", Map.of())
+            .recordStep("A", RESERVED)
+            .recordStep("B", PRICED)
+            .addressedTo("B2");
+
+    private final InMemoryForkSkips forks = new InMemoryForkSkips();
+
+    @Test
+    void aStepOfAForkThatHasFailedDoesNoWorkAndGoesStraightToTheJoinAsSkipped() {
+        forks.markFailed(FORK_KEY);
+        var runner = forkStep("B2", message -> {
+            throw new AssertionError("a skipped step must not do its work");
+        });
+
+        runner.handle(AT_B2);
+
+        assertThat(compensations.requests).isEmpty();
+        assertThat(publisher.sent).singleElement().satisfies(sent -> {
+            assertThat(sent.stepId()).isEqualTo("J");
+            assertThat(sent.message()).isEqualTo(AT_B2.recordSkip("B2", "B2").addressedTo("J"));
+        });
+    }
+
+    @Test
+    void aStepOfAForkNoBranchHasFailedInRunsAndHandsOn() {
+        forkStep("B2", message -> TAXED).handle(AT_B2);
+
+        assertThat(publisher.sent).singleElement()
+                .satisfies(sent -> assertThat(sent.message()).isEqualTo(AT_B2.recordStep("B2", TAXED).addressedTo("J")));
+    }
+
+    @Test
+    void aStepOutsideAnyForkNeverAsksAboutForks() {
+        var unreachable = new ForkSkips() {
+            @Override
+            public void markFailed(JoinKey fork) {
+                throw new AssertionError("no fork to mark");
+            }
+
+            @Override
+            public boolean skips(JoinKey fork, String entryId) {
+                throw new AssertionError("no fork to ask about");
+            }
+        };
+        var incoming = ChoreographyMessage.start("order-42", "checkout", Map.of()).recordStep("A", RESERVED);
+
+        new StepRunner("B", message -> PRICED, FLOW, publisher, trigger, service -> true, unreachable).handle(incoming);
+        new StepRunner("B", message -> PRICED, FLOW, publisher, trigger, service -> true, unreachable).fail(incoming);
+
+        assertThat(publisher.sent).hasSize(1);
+        assertThat(compensations.requests).hasSize(1);
+    }
+
+    @Test
+    void aStepThatGivesUpInsideAForkMarksTheForkFailedBeforeTellingTheJoin() {
+        var markedWhenPublished = new ArrayList<Boolean>();
+        MessagePublisher checking = new MessagePublisher() {
+            @Override
+            public void publish(String stepId, ChoreographyMessage message) {
+                markedWhenPublished.add(forks.skips(FORK_KEY, "a sibling's next step"));
+            }
+
+            @Override
+            public void publishCompleted(ChoreographyMessage message) {}
+        };
+
+        new StepRunner("B2", message -> TAXED, FORK, checking, trigger, service -> true, forks).fail(AT_B2);
+
+        assertThat(markedWhenPublished).containsExactly(true);
+    }
+
+    @Test
+    void aStepWhoseNextServiceNeverComesInsideAForkMarksTheFork() {
+        var atB = ChoreographyMessage.start("order-42", "checkout", Map.of()).recordStep("A", RESERVED).addressedTo("B");
+
+        new StepRunner("B", message -> PRICED, FORK, publisher, trigger, service -> !service.equals("B2"), forks)
+                .failNextHop(atB);
+
+        assertThat(forks.skips(FORK_KEY, "C:not-yet-run")).isTrue();
+        assertThat(publisher.sent).singleElement().satisfies(sent -> assertThat(sent.stepId()).isEqualTo("J"));
+    }
+
+    @Test
+    void aMessageRedeliveredAfterItsStepWasToldToRunRunsAgainThoughTheForkFailedMeanwhile() {
+        // The first delivery may have done the work and crashed before handing on: skipping now
+        // would leave that work undone forever.
+        var runner = forkStep("B2", message -> TAXED);
+        runner.handle(AT_B2);
+        forks.markFailed(FORK_KEY);
+
+        runner.handle(AT_B2);
+
+        assertThat(publisher.sent).hasSize(2);
+        assertThat(publisher.sent.get(1)).isEqualTo(publisher.sent.get(0));
+    }
+
+    @Test
+    void aStepThatWasSkippedIsSkippedAgainWhenItsMessageIsRedelivered() {
+        forks.markFailed(FORK_KEY);
+        var runner = forkStep("B2", message -> TAXED);
+        runner.handle(AT_B2);
+
+        runner.handle(AT_B2);
+
+        assertThat(publisher.sent).extracting(sent -> sent.message().trace().get(2).outcome())
+                .containsExactly(TraceEntry.Outcome.SKIPPED, TraceEntry.Outcome.SKIPPED);
+    }
+
+    private StepRunner forkStep(String stepId, StepAction action) {
+        return new StepRunner(stepId, action, FORK, publisher, trigger, service -> true, forks);
     }
 
     @Test

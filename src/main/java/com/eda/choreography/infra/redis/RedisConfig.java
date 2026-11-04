@@ -1,5 +1,6 @@
 package com.eda.choreography.infra.redis;
 
+import com.eda.choreography.domain.join.ForkSkips;
 import com.eda.choreography.domain.join.JoinDeadlines;
 import com.eda.choreography.domain.join.JoinStateMachine;
 import com.eda.choreography.domain.join.JoinStateStore;
@@ -10,8 +11,9 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.data.redis.core.StringRedisTemplate;
 
 /**
- * Redis-backed join state and join deadlines. The connection and {@link StringRedisTemplate} come from Spring
- * Boot's {@code spring-boot-data-redis} auto-configuration, which connects lazily.
+ * Redis-backed join state, join deadlines and fork failures. The connection and
+ * {@link StringRedisTemplate} come from Spring Boot's {@code spring-boot-data-redis}
+ * auto-configuration, which connects lazily.
  */
 @Configuration(proxyBeanMethods = false)
 public class RedisConfig {
@@ -26,6 +28,13 @@ public class RedisConfig {
     @Bean
     JoinDeadlines joinDeadlines(StringRedisTemplate redis) {
         return new RedisJoinDeadlines(redis);
+    }
+
+    @Bean
+    ForkSkips forkSkips(
+            StringRedisTemplate redis,
+            @Value("${choreography.join.state-ttl}") Duration stateTimeToLive) {
+        return new RedisForkSkips(redis, stateTimeToLive);
     }
 
     @Bean
