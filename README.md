@@ -177,7 +177,7 @@ Three rules keep this safe:
 
 The mark only saves work. If Redis cannot be reached, the step runs, as it would without it.
 
-How much it saves is measured in [docs/evaluation/fork-failure.md](docs/evaluation/fork-failure.md):
+How much it saves is measured in [benchmarks/fork-failure.md](benchmarks/fork-failure.md):
 with a five-step sibling branch, the steps started after the failure drop from 3 to 0, and the
 time from the failure to the instance being compensated from about 3.1 s to under 0.1 s. The
 `fork-skip` demo flow shows it on the diagram.

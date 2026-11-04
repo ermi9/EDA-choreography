@@ -1,0 +1,16 @@
+label,branchLength,repetition,bStepsRun,wastedSteps,wastedUndos,bStepsSkipped,failureToCompensatedMillis
+before,1,1,1,0,0,0,126
+before,1,2,1,0,0,0,53
+before,1,3,1,0,0,0,62
+before,1,4,1,0,0,0,51
+before,1,5,1,0,0,0,55
+before,3,1,3,1,1,0,1115
+before,3,2,3,1,1,0,1099
+before,3,3,3,1,1,0,1094
+before,3,4,3,1,1,0,1085
+before,3,5,3,1,1,0,1083
+before,5,1,5,3,3,0,3184
+before,5,2,5,3,3,0,3123
+before,5,3,5,3,3,0,3126
+before,5,4,5,3,3,0,3130
+before,5,5,5,3,3,0,3123
