@@ -242,6 +242,9 @@ const scenarios = [
   { flow: 'showcase', title: 'showcase: loop hits its limit', input: { amount: 20, rounds: 10 }, note: 'The flow allows each step 3 runs. reserve would run a 4th time, so it fails and its three rounds are undone.' },
   { flow: 'showcase', title: 'showcase: last notify fails after the join', input: { amount: 20, failAt: 'Task_done' }, note: 'Everything ran, so everything is undone: confirm, then both branches, then the steps before the fork.' },
   { flow: 'showcase', title: 'showcase: express branch misses the join', input: { amount: 20, express: true, delayMs: 5000 }, note: 'Each step takes 5 s. The ship branch has one step more, so it arrives over 3 s after pay; the join gives up, and the late branch undoes itself.' },
+  { flow: 'fork-skip', title: 'fork-skip: both branches finish', input: { amount: 20 }, note: 'ship on one branch, pay, charge and notify on the other. The join fires once both arrive.' },
+  { flow: 'fork-skip', title: 'fork-skip: ship fails while pay works, charge is skipped', input: { amount: 20, failAt: 'ship', delayMs: 3000 }, note: 'Each step takes 3 s. ship gives up after its retries while pay is still working, and marks the fork failed. charge is skipped (grey) and goes straight to the join, notify is never reached, and only pay and assess are undone.' },
+  { flow: 'fork-skip', title: 'fork-skip: ship fails after the long branch finished', input: { amount: 20, failAt: 'ship' }, note: 'No delay, so pay, charge and notify are done before ship gives up. Nothing is left to skip: all three are undone, then assess. Only steps not started yet can be skipped.' },
   { flow: 'showcase', title: 'showcase: gift needs a service nobody runs', input: { amount: 20, gift: true }, note: 'wrap is late-bound and never registers. confirm waits 30 s for it, then wrap counts as failed and everything is undone.' }
 ];
 

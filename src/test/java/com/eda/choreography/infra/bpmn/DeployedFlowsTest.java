@@ -8,6 +8,7 @@ import com.eda.choreography.infra.plan.SpelConditions;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 
@@ -44,5 +45,16 @@ class DeployedFlowsTest {
         assertThat(conditions.holds(leave.condition(), Map.of("visits", 2, "rounds", 3))).isFalse();
         assertThat(conditions.holds(leave.condition(), Map.of("visits", 3, "rounds", 3))).isTrue();
         assertThat(conditions.holds(leave.condition(), Map.of("visits", 3))).isTrue();
+    }
+
+    @Test
+    void theForkSkipFlowForksIntoAOneStepAndAThreeStepBranchJoinedAtConfirm() throws IOException {
+        var plan = planner.plan(new BpmnFlow("fork-skip", Files.readString(Path.of("deploy/flows/fork-skip.bpmn"))));
+
+        assertThat(plan.expectedBranches("confirm")).isEqualTo(2);
+        for (var step : List.of("ship", "pay", "charge", "notify")) {
+            assertThat(plan.enclosingJoin(step)).as(step).contains("confirm");
+        }
+        assertThat(plan.enclosingJoin("assess")).isEmpty();
     }
 }
