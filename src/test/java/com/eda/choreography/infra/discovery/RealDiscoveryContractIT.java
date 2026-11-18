@@ -81,7 +81,7 @@ class RealDiscoveryContractIT {
     }
 
     @Test
-    void aServiceRegisteredWithTheRealDiscoveryIsResolvedFromItsStreamAndTurnsLiveOnceProbed() throws Exception {
+    void aServiceRegisteredWithTheRealDiscoveryIsResolvedFromItsStreamWithItsSpecAndTurnsLiveOnceProbed() throws Exception {
         var table = new ServiceTable();
         var listener = ServiceEventsListener.create(
                 ServiceEventsListener.consumerFactory(KAFKA.getBootstrapServers()), "service-events", "contract-test", table);
@@ -104,6 +104,8 @@ class RealDiscoveryContractIT {
                         assertThat(resolution.compensationTopic()).isEqualTo("fraud-check.compensate");
                     });
             await().atMost(Duration.ofSeconds(60)).until(() -> table.resolve("fraud-check").map(Resolution::live).orElse(false));
+            // The spec address it registered survives discovery's events, including the status changes.
+            assertThat(table.openapiUrl("fraud-check")).contains(url + "/openapi");
         } finally {
             listener.stop();
         }
