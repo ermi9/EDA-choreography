@@ -1,6 +1,9 @@
 package com.eda.choreography.infra.web;
 
 import com.eda.choreography.domain.message.ChoreographyMessage;
+import com.eda.choreography.domain.resolution.ServiceTable;
+import java.time.Clock;
+import java.time.Duration;
 import java.util.UUID;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -21,6 +24,15 @@ import org.springframework.kafka.listener.MessageListener;
 public class WebConfig {
 
     private static final int KEPT_OUTCOMES = 1_000;
+
+    @Bean
+    ServiceSpecs serviceSpecs(
+            ServiceTable catalog,
+            @Value("${choreography.specs.timeout:PT2S}") Duration timeout,
+            @Value("${choreography.specs.max-bytes:1048576}") int maxBytes,
+            @Value("${choreography.specs.keep-for:PT30S}") Duration keepFor) {
+        return new ServiceSpecs(catalog, timeout, maxBytes, keepFor, Clock.systemUTC());
+    }
 
     @Bean
     RunOutcomes runOutcomes() {

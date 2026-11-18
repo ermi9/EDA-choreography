@@ -11,6 +11,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.SortedSet;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.InvalidMediaTypeException;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -27,7 +28,10 @@ import org.springframework.web.bind.annotation.RestController;
  * seeing how a run ended.
  *
  * <ul>
- *   <li>{@code GET /api/catalog}: the services discovery's stream announced, with liveness;</li>
+ *   <li>{@code GET /api/catalog}: the services discovery's stream announced, with liveness and
+ *       whether each registered an OpenAPI spec;</li>
+ *   <li>{@code GET /api/catalog/{name}/openapi}: that spec, fetched by the engine from the address
+ *       the service registered; 404 when it registered none, 502 when it cannot be fetched;</li>
  *   <li>{@code GET /api/flows}, {@code GET /api/flows/{name}}: the stored flows, and one as BPMN;</li>
  *   <li>{@code PUT /api/flows/{name}}: stores a flow if it can run, and says which services are
  *       late-bound; a flow that cannot run is 400 with the reason;</li>
@@ -45,9 +49,11 @@ public class AuthoringApi {
     private final FlowStore store;
     private final Flows flows;
     private final RunOutcomes outcomes;
+    private final ServiceSpecs specs;
 
-    public AuthoringApi(ServiceTable catalog, FlowStore store, Flows flows, RunOutcomes outcomes) {
+    public AuthoringApi(ServiceTable catalog, FlowStore store, Flows flows, RunOutcomes outcomes, ServiceSpecs specs) {
         this.catalog = catalog;
+        this.specs = specs;
         this.store = store;
         this.flows = flows;
         this.outcomes = outcomes;
@@ -56,8 +62,34 @@ public class AuthoringApi {
     @GetMapping("/catalog")
     public List<Map<String, Object>> catalog() {
         return catalog.services().entrySet().stream()
-                .map(service -> Map.<String, Object>of("name", service.getKey(), "live", service.getValue().live()))
+                .map(service -> Map.<String, Object>of(
+                        "name", service.getKey(),
+                        "live", service.getValue().live(),
+                        "hasSpec", specs.has(service.getKey())))
                 .toList();
+    }
+
+    @GetMapping("/catalog/{name}/openapi")
+    public ResponseEntity<?> openapi(@PathVariable String name) {
+        var spec = specs.fetch(name);
+        if (spec instanceof ServiceSpecs.Spec.Found found) {
+            return ResponseEntity.ok()
+                    .contentType(mediaType(found.contentType()))
+                    .body(found.body());
+        }
+        if (spec instanceof ServiceSpecs.Spec.Unreachable unreachable) {
+            return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(Map.of("error", unreachable.reason()));
+        }
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", name + " registered no OpenAPI spec"));
+    }
+
+    /** The type the service sent, or JSON when it sent one that cannot be read. */
+    private static MediaType mediaType(String contentType) {
+        try {
+            return MediaType.parseMediaType(contentType);
+        } catch (InvalidMediaTypeException e) {
+            return MediaType.APPLICATION_JSON;
+        }
     }
 
     @GetMapping("/flows")
