@@ -10,7 +10,7 @@ import org.junit.jupiter.api.Test;
 class ServiceEventFormatTest {
 
     @Test
-    void readsAnEventAsDiscoveryWritesItAndIgnoresTheFieldsItDoesNotUse() {
+    void readsAnEventAsDiscoveryWritesItWithItsUrlsAndIgnoresTheFieldsItDoesNotUse() {
         // Every field of discovery's published event, with a type header naming discovery's class.
         var json = """
                 {"type":"STATUS_CHANGED","serviceName":"payment","url":"http://payment:8080",
@@ -25,7 +25,8 @@ class ServiceEventFormatTest {
                 .deserialize("service-events", headers, json.getBytes(StandardCharsets.UTF_8));
 
         assertThat(event).isEqualTo(
-                new ServiceEvent("STATUS_CHANGED", "payment", "healthy", 7, "payment.in", "payment.compensate"));
+                new ServiceEvent("STATUS_CHANGED", "payment", "healthy", 7, "payment.in", "payment.compensate",
+                        "http://payment:8080", "http://payment:8080/v3/api-docs"));
     }
 
     @Test

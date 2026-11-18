@@ -34,11 +34,11 @@ public final class ServiceTable implements ResolutionSource {
             return;
         }
         switch (event.type()) {
-            case ServiceEvent.REGISTERED -> services.put(event.serviceName(), Entry.of(event, false));
-            case ServiceEvent.DEREGISTERED -> services.put(event.serviceName(), Entry.of(event, true));
+            case ServiceEvent.REGISTERED -> services.put(event.serviceName(), Entry.of(event, false, null));
+            case ServiceEvent.DEREGISTERED -> services.put(event.serviceName(), Entry.of(event, true, null));
             case ServiceEvent.STATUS_CHANGED -> services.compute(event.serviceName(), (name, known) ->
                     known == null || (!known.deregistered && event.generation() >= known.generation)
-                            ? Entry.of(event, false)
+                            ? Entry.of(event, false, known)
                             : known);
             default -> {
             }
@@ -59,6 +59,16 @@ public final class ServiceTable implements ResolutionSource {
         return Collections.unmodifiableSortedMap(known);
     }
 
+    /**
+     * Where the service serves its OpenAPI spec, as it registered with discovery. Empty when it
+     * named none, or when it is deregistered: its spec is of no use for drawing new flows.
+     */
+    public Optional<String> openapiUrl(String serviceName) {
+        return Optional.ofNullable(services.get(serviceName))
+                .filter(entry -> !entry.deregistered())
+                .map(Entry::openapiUrl);
+    }
+
     @Override
     public Optional<Resolution> resolve(String serviceName) {
         return Optional.ofNullable(services.get(serviceName)).map(Entry::resolution);
@@ -76,14 +86,21 @@ public final class ServiceTable implements ResolutionSource {
         return value != null && !value.isBlank();
     }
 
-    private record Entry(Resolution resolution, long generation, boolean deregistered) {
+    private record Entry(Resolution resolution, long generation, boolean deregistered, String openapiUrl) {
 
-        static Entry of(ServiceEvent event, boolean deregistered) {
+        /**
+         * The entry an event leaves. A status change that does not name the spec keeps the one
+         * the service registered with ({@code known}); a registration names its own or none.
+         */
+        static Entry of(ServiceEvent event, boolean deregistered, Entry known) {
             var live = !deregistered && ServiceEvent.HEALTHY.equals(event.status());
+            var openapiUrl = hasText(event.openapiUrl()) ? event.openapiUrl()
+                    : known == null ? null : known.openapiUrl();
             return new Entry(
                     new Resolution(event.inputTopic(), event.compensationTopic(), live),
                     event.generation(),
-                    deregistered);
+                    deregistered,
+                    deregistered ? null : openapiUrl);
         }
     }
 }

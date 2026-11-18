@@ -14,6 +14,8 @@ package com.eda.choreography.domain.resolution;
  * @param generation        the fencing token: a status change below the highest seen is stale
  * @param inputTopic        where the service consumes its steps
  * @param compensationTopic where the service consumes its undo requests
+ * @param url               where the service answers, as it registered; may be missing
+ * @param openapiUrl        where its OpenAPI spec is served, as it registered; may be missing
  */
 public record ServiceEvent(
         String type,
@@ -21,10 +23,18 @@ public record ServiceEvent(
         String status,
         long generation,
         String inputTopic,
-        String compensationTopic) {
+        String compensationTopic,
+        String url,
+        String openapiUrl) {
 
     public static final String REGISTERED = "SERVICE_REGISTERED";
     public static final String DEREGISTERED = "SERVICE_DEREGISTERED";
     public static final String STATUS_CHANGED = "STATUS_CHANGED";
     public static final String HEALTHY = "healthy";
+
+    /** An event that names neither the service's url nor its spec. */
+    public ServiceEvent(String type, String serviceName, String status, long generation,
+                        String inputTopic, String compensationTopic) {
+        this(type, serviceName, status, generation, inputTopic, compensationTopic, null, null);
+    }
 }

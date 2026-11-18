@@ -123,6 +123,56 @@ class ServiceTableTest {
         assertThat(table.resolve("payment")).isEmpty();
     }
 
+    @Test
+    void keepsTheSpecUrlAServiceRegisteredWith() {
+        table.apply(registered("payment", "http://payment:8080/v3/api-docs"));
+
+        assertThat(table.openapiUrl("payment")).contains("http://payment:8080/v3/api-docs");
+    }
+
+    @Test
+    void aStatusChangeThatDoesNotNameTheSpecKeepsTheOneRegistered() {
+        table.apply(registered("payment", "http://payment:8080/v3/api-docs"));
+
+        table.apply(event(STATUS_CHANGED, "payment", "healthy", 2));
+
+        assertThat(table.openapiUrl("payment")).contains("http://payment:8080/v3/api-docs");
+    }
+
+    @Test
+    void aStatusChangeThatNamesAnotherSpecReplacesIt() {
+        table.apply(registered("payment", "http://payment:8080/v3/api-docs"));
+
+        table.apply(new ServiceEvent(STATUS_CHANGED, "payment", "healthy", 2, "payment.in", "payment.compensate",
+                "http://payment:9090", "http://payment:9090/v3/api-docs"));
+
+        assertThat(table.openapiUrl("payment")).contains("http://payment:9090/v3/api-docs");
+    }
+
+    @Test
+    void aServiceThatNamedNoSpecHasNone() {
+        table.apply(event(REGISTERED, "payment", "unknown", 1));
+
+        assertThat(table.openapiUrl("payment")).isEmpty();
+        assertThat(table.openapiUrl("unheard-of")).isEmpty();
+    }
+
+    @Test
+    void aDeregisteredServiceHasNoSpecAndANewRegistrationWithoutOneDoesNotBringItBack() {
+        table.apply(registered("payment", "http://payment:8080/v3/api-docs"));
+
+        table.apply(event(DEREGISTERED, "payment", "unavailable", 1));
+        assertThat(table.openapiUrl("payment")).isEmpty();
+
+        table.apply(event(REGISTERED, "payment", "unknown", 2));
+        assertThat(table.openapiUrl("payment")).isEmpty();
+    }
+
+    private static ServiceEvent registered(String name, String openapiUrl) {
+        return new ServiceEvent(REGISTERED, name, "unknown", 1, name + ".in", name + ".compensate",
+                "http://" + name + ":8080", openapiUrl);
+    }
+
     static ServiceEvent event(String type, String name, String status, long generation) {
         return new ServiceEvent(type, name, status, generation, name + ".in", name + ".compensate");
     }
