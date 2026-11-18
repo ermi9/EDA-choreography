@@ -74,6 +74,23 @@ class AuthoringFlowIT extends AbstractInfraIT {
                 .satisfies(entry -> assertThat(entry.get("outcome").asString()).isEqualTo("FAILED"));
     }
 
+    @Test
+    void aHostedServiceServesTheSpecItRegistersAndTheCatalogPassesItOn() throws Exception {
+        var own = send("GET", "/services/auth-pay/openapi", null, "application/json");
+        assertThat(own.statusCode()).isEqualTo(200);
+        assertThat(json(own).at("/x-choreography/step/topic").asString()).isEqualTo("auth-pay.in");
+        assertThat(send("GET", "/services/not-hosted/openapi", null, "application/json").statusCode()).isEqualTo(404);
+
+        // Announced the way the registration announces it: the hosted service's own spec address.
+        DISCOVERY.registerHealthyWithSpec("auth-pay", "http://localhost:" + port + "/services/auth-pay/openapi");
+        await().atMost(Duration.ofSeconds(30)).until(() -> serviceTable.openapiUrl("auth-pay")
+                .filter(url -> url.startsWith("http://localhost")).isPresent());
+
+        var passedOn = send("GET", "/api/catalog/auth-pay/openapi", null, "application/json");
+        assertThat(passedOn.statusCode()).isEqualTo(200);
+        assertThat(json(passedOn).at("/x-choreography/undo/topic").asString()).isEqualTo("auth-pay.compensate");
+    }
+
     private JsonNode runAndAwait(String input) throws Exception {
         var started = send("POST", "/api/flows/" + flow + "/runs", input, "application/json");
         assertThat(started.statusCode()).isEqualTo(202);
