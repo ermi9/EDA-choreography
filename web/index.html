@@ -28,6 +28,14 @@
   ul.catalog li:hover { background: #eef2ff; }
   .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--bad); flex: none; }
   .dot.live { background: var(--ok); }
+  .api-tag { margin-left: auto; font: 600 10px/1 system-ui, sans-serif; color: var(--accent); border: 1px solid var(--accent); border-radius: 8px; padding: 2px 5px; }
+  #spec-panel { margin-top: 10px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: #fff; font-size: 13px; }
+  #spec-panel h3 { font-size: 13px; margin: 0 0 2px; }
+  #spec-panel .muted { color: var(--muted); font-size: 12px; }
+  #spec-panel ul { margin: 4px 0 6px; padding-left: 16px; }
+  #spec-panel li { margin: 2px 0; }
+  #spec-panel code { font-size: 12px; }
+  .method { font: 600 11px/1 ui-monospace, monospace; color: var(--accent); margin-right: 4px; }
   #message { margin-top: 10px; font-size: 13px; white-space: pre-wrap; }
   .error { color: var(--bad); }
   .success { color: var(--ok); }
@@ -79,6 +87,7 @@
     <ul class="catalog" id="catalog"></ul>
     <label for="custom-service">Or a service that does not exist yet (late-bound)</label>
     <div class="row"><input id="custom-service" placeholder="e.g. fraud-check"><button class="secondary" id="apply-custom">Use</button></div>
+    <div id="spec-panel" hidden></div>
   </div>
   <div id="flow-panel" hidden>
     <label for="condition">Condition on the previous task's result (SpEL)</label>
@@ -114,6 +123,8 @@ const modeler = new BpmnJS({ container: '#canvas', moddleExtensions: { choreo: c
 const modeling = modeler.get('modeling');
 const moddle = modeler.get('moddle');
 let selected = null;
+let catalog = {};
+const specs = {};
 
 const $ = id => document.getElementById(id);
 function say(text, kind) { $('message').textContent = text; $('message').className = kind || ''; }
@@ -147,6 +158,7 @@ modeler.get('eventBus').on('selection.changed', ({ newSelection }) => {
   $('flow-panel').hidden = !isChoiceFlow;
   if (!bo) { $('selected').textContent = 'Nothing selected.'; return; }
   $('selected').textContent = bo.$type.replace('bpmn:', '') + (isTask ? ' — service: ' + (bo.get('choreo:service') || bo.name || 'none yet') : '');
+  if (isTask) { showSpec(bo.get('choreo:service')); }
   if (isChoiceFlow) {
     $('condition').value = bo.conditionExpression ? bo.conditionExpression.body : '';
     $('is-default').checked = bo.sourceRef.default === bo;
@@ -157,6 +169,70 @@ function useService(name) {
   if (!selected || !/^[A-Za-z0-9._-]+$/.test(name)) { say('A service name may only hold letters, digits, ".", "_" and "-".', 'error'); return; }
   modeling.updateProperties(selected, { name, 'choreo:service': name });
   $('selected').textContent = 'Task — service: ' + name;
+  showSpec(name);
+}
+
+// A spec is the service's own text, so it is only ever put on the page escaped.
+function esc(text) {
+  return String(text == null ? '' : text).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+}
+
+function resolveRef(spec, node) {
+  if (!node || !node.$ref || !node.$ref.startsWith('#/')) { return node; }
+  return node.$ref.slice(2).split('/').reduce((at, key) => at && at[key], spec);
+}
+
+function fieldList(spec, schemaNode) {
+  const schema = resolveRef(spec, schemaNode);
+  const properties = (schema && schema.properties) || {};
+  const names = Object.keys(properties);
+  if (!names.length) { return '<span class="muted">none listed</span>'; }
+  return '<ul>' + names.map(name => '<li><code>' + esc(name) + '</code> <span class="muted">'
+    + esc((properties[name].type || '') + (properties[name].description ? ', ' + properties[name].description : '')) + '</span></li>').join('') + '</ul>';
+}
+
+function renderSpec(name, spec) {
+  const info = spec.info || {};
+  let html = '<h3>' + esc(info.title || name) + ' <span class="muted">' + esc(info.version || '') + '</span></h3>';
+  if (info.description) { html += '<div class="muted">' + esc(info.description) + '</div>'; }
+  const choreography = spec['x-choreography'];
+  if (choreography) {
+    const step = choreography.step || {};
+    const undo = choreography.undo || {};
+    html += '<div style="margin-top:6px"><b>Step</b> <span class="muted">read from</span> <code>' + esc(step.topic) + '</code></div>';
+    if (step.result) { html += '<div>Result fields a condition can test as <code>#result[...]</code>:</div>' + fieldList(spec, step.result); }
+    if (step.input) { html += '<div>Input fields that steer it:</div>' + fieldList(spec, step.input); }
+    html += '<div><b>Undo</b> <span class="muted">read from</span> <code>' + esc(undo.topic) + '</code>'
+      + (undo.description ? ' <span class="muted">' + esc(undo.description) + '</span>' : '') + '</div>';
+  }
+  const operations = [];
+  for (const [path, item] of Object.entries(spec.paths || {})) {
+    for (const [method, operation] of Object.entries(item || {})) {
+      if (['get', 'put', 'post', 'delete', 'patch', 'head', 'options'].includes(method)) {
+        operations.push('<li><span class="method">' + esc(method.toUpperCase()) + '</span><code>' + esc(path) + '</code>'
+          + (operation && operation.summary ? ' <span class="muted">' + esc(operation.summary) + '</span>' : '') + '</li>');
+      }
+    }
+  }
+  html += '<div style="margin-top:6px"><b>HTTP operations</b></div>' + (operations.length ? '<ul>' + operations.join('') + '</ul>' : '<div class="muted">none</div>');
+  html += '<a href="' + esc(API + '/api/catalog/' + encodeURIComponent(name) + '/openapi') + '" target="_blank" rel="noopener">Raw spec (JSON)</a>';
+  return html;
+}
+
+async function showSpec(name) {
+  const panel = $('spec-panel');
+  if (!name || !catalog[name]) { panel.hidden = true; return; }
+  panel.hidden = false;
+  if (!catalog[name].hasSpec) { panel.innerHTML = '<span class="muted">' + esc(name) + ' registered no OpenAPI spec.</span>'; return; }
+  panel.innerHTML = '<span class="muted">Loading the spec of ' + esc(name) + '…</span>';
+  try {
+    specs[name] = specs[name] || await api('GET', '/api/catalog/' + encodeURIComponent(name) + '/openapi');
+    if (typeof specs[name] !== 'object') { throw new Error('the spec is not JSON'); }
+    panel.innerHTML = renderSpec(name, specs[name]);
+  } catch (e) {
+    delete specs[name];
+    panel.innerHTML = '<span class="error">Could not load the spec of ' + esc(name) + ': ' + esc(e.message) + '</span>';
+  }
 }
 
 $('apply-custom').onclick = () => useService($('custom-service').value.trim());
@@ -177,11 +253,20 @@ $('apply-condition').onclick = () => {
 async function loadCatalog() {
   try {
     const services = await api('GET', '/api/catalog');
+    catalog = Object.fromEntries(services.map(service => [service.name, service]));
+    for (const name of Object.keys(specs)) { delete specs[name]; }
     $('catalog').innerHTML = '';
     for (const service of services) {
       const item = document.createElement('li');
       item.innerHTML = '<span class="dot' + (service.live ? ' live' : '') + '"></span>';
       item.append(service.name);
+      if (service.hasSpec) {
+        const tag = document.createElement('span');
+        tag.className = 'api-tag';
+        tag.textContent = 'API';
+        tag.title = 'This service registered an OpenAPI spec';
+        item.append(tag);
+      }
       item.onclick = () => useService(service.name);
       $('catalog').append(item);
     }
