@@ -57,7 +57,7 @@ services:
     environment:
       <<: *engine-env
       PARTICIPANTS: "true"
-      CHOREOGRAPHY_COMPENSATION_RETRYFOR: ${COMPENSATION_RETRY_FOR:-5m}
+      COMPENSATION_RETRY_FOR: ${COMPENSATION_RETRY_FOR:-5m}
     extra_hosts: ["host.docker.internal:host-gateway"]
     ports: ["${PORT:-80}:8080"]
     volumes: [./flows:/flows:ro]
