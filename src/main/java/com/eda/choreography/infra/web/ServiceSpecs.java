@@ -57,7 +57,9 @@ public class ServiceSpecs {
         this.maxBytes = maxBytes;
         this.keepFor = Objects.requireNonNull(keepFor, "keepFor");
         this.clock = Objects.requireNonNull(clock, "clock");
+        // Plain HTTP/1.1: not every server in every language copes with an offer to upgrade.
         this.http = HttpClient.newBuilder()
+                .version(HttpClient.Version.HTTP_1_1)
                 .connectTimeout(timeout)
                 .followRedirects(HttpClient.Redirect.NEVER)
                 .build();
