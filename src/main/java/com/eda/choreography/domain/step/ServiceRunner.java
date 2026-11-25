@@ -49,6 +49,14 @@ public final class ServiceRunner {
         }
     }
 
+    public void failUncertain(ChoreographyMessage message) {
+        if (joins(message)) {
+            join.failUncertain(message);
+        } else {
+            step.failUncertain(message);
+        }
+    }
+
     public void failNextHop(ChoreographyMessage message) {
         if (joins(message)) {
             join.failNextHop(message);

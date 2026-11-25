@@ -432,4 +432,35 @@ class StepRunnerTest {
         assertThatThrownBy(() -> new StepRunner(" ", message -> Map.of(), FLOW, publisher, trigger))
                 .isInstanceOf(IllegalArgumentException.class);
     }
+
+    @Test
+    void aStepThatMayHaveHappenedIsUndoneFirstUnderTheSameRun() {
+        var incoming = ChoreographyMessage.start("order-42", "checkout", Map.of()).recordStep("A", RESERVED);
+        var runner = new StepRunner("B", message -> PRICED, FLOW, publisher, trigger);
+
+        runner.failUncertain(incoming);
+
+        assertThat(publisher.sent).isEmpty();
+        assertThat(compensations.requests).singleElement().satisfies(sent -> {
+            var entry = sent.request().entry();
+            assertThat(entry.stepId()).isEqualTo("B");
+            assertThat(entry.outcome()).isEqualTo(TraceEntry.Outcome.UNCERTAIN);
+            assertThat(entry.resultRef()).isEqualTo(incoming.entryIdFor("B"));
+            assertThat(entry.id()).isNotEqualTo(incoming.entryIdFor("B"));
+            assertThat(sent.request().instance().hasFailed()).isTrue();
+            assertThat(sent.request().instance().resultOf("B")).isEmpty();
+        });
+    }
+
+    @Test
+    void workThatWasDoneButCouldNotBeHandedOnIsReportedAsUncertain() {
+        NextSteps noRoute = (stepId, message) -> {
+            throw new IllegalStateException("no route");
+        };
+        var runner = new StepRunner("A", message -> RESERVED, noRoute, publisher, trigger);
+
+        assertThatThrownBy(() -> runner.handle(ChoreographyMessage.start("order-42", "checkout", Map.of())))
+                .isInstanceOf(UncertainOutcomeException.class)
+                .hasRootCauseMessage("no route");
+    }
 }

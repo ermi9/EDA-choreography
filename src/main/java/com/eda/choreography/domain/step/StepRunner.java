@@ -99,7 +99,8 @@ public final class StepRunner {
 
     /**
      * Runs the step on one incoming message. If the step throws, nothing is published and the
-     * exception reaches the adapter, which decides about redelivery.
+     * exception reaches the adapter, which decides about redelivery. An exception after the step's
+     * work was done arrives as an {@link UncertainOutcomeException}, so giving up undoes that work.
      */
     public void handle(ChoreographyMessage incoming) {
         var step = stepOf(incoming);
@@ -113,7 +114,17 @@ public final class StepRunner {
             reportFailure(step, incoming.recordFailure(step, stepId));
             return;
         }
-        var outgoing = incoming.recordStep(step, stepId, action.execute(incoming));
+        var result = action.execute(incoming);
+        try {
+            handOn(step, incoming.recordStep(step, stepId, result));
+        } catch (NextHopUnavailableException e) {
+            throw e;
+        } catch (RuntimeException e) {
+            throw new UncertainOutcomeException("step " + step + " ran but could not be handed on", e);
+        }
+    }
+
+    private void handOn(String step, ChoreographyMessage outgoing) {
         var next = nextSteps.after(step, outgoing);
         if (next.isEmpty()) {
             publisher.publishCompleted(outgoing);
@@ -127,7 +138,7 @@ public final class StepRunner {
             throw new NextHopUnavailableException(step, waitingFor);
         }
         for (var target : next) {
-            handOn(target, outgoing);
+            publishTo(target, outgoing);
         }
     }
 
@@ -147,14 +158,14 @@ public final class StepRunner {
         for (var target : nextSteps.after(step, outgoing)) {
             var service = nextSteps.serviceOf(target, outgoing);
             if (takesWork.test(service)) {
-                handOn(target, outgoing);
+                publishTo(target, outgoing);
             } else {
                 reportFailure(target, outgoing.recordFailure(target, service));
             }
         }
     }
 
-    private void handOn(String target, ChoreographyMessage outgoing) {
+    private void publishTo(String target, ChoreographyMessage outgoing) {
         publisher.publish(nextSteps.serviceOf(target, outgoing), outgoing.addressedTo(target));
     }
 
@@ -169,6 +180,16 @@ public final class StepRunner {
     public void fail(ChoreographyMessage incoming) {
         var step = stepOf(incoming);
         reportFailure(step, incoming.recordFailure(step, stepId));
+    }
+
+    /**
+     * Gives up on the step as {@link #fail} does, when its work may have happened all the same.
+     * The step is recorded as uncertain, so the compensation asks its service to undo it before
+     * anything earlier is undone.
+     */
+    public void failUncertain(ChoreographyMessage incoming) {
+        var step = stepOf(incoming);
+        reportFailure(step, incoming.recordUncertain(step, stepId));
     }
 
     /**

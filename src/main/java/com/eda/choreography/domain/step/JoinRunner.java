@@ -108,6 +108,11 @@ public final class JoinRunner {
         arrive(branch, step::fail);
     }
 
+    /** Gives up on the join step when its work may have happened (see {@link StepRunner#failUncertain}). */
+    public void failUncertain(ChoreographyMessage branch) {
+        arrive(branch, step::failUncertain);
+    }
+
     /**
      * Gives up waiting for the service after the join step, after the adapter waited as long as a
      * late-bound service may take to appear (see {@link StepRunner#failNextHop}).

@@ -118,11 +118,15 @@ public class KafkaConfig {
      * A step that joins late, or a new consumer group, starts from the earliest unconsumed
      * message: requests already waiting on a step's topic must not be skipped. Offsets are
      * committed by the listener containers, never automatically.
+     *
+     * <p>Few records are taken per poll, so that steps which each wait out a call to a slow service
+     * still finish within the five minutes after which Kafka takes the partition away.
      */
     private static Map<String, Object> consumerProperties(String bootstrapServers) {
         return Map.of(
                 ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers,
                 ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest",
+                ConsumerConfig.MAX_POLL_RECORDS_CONFIG, 10,
                 ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, false);
     }
 }

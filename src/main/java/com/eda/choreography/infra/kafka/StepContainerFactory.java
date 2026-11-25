@@ -6,7 +6,9 @@ import com.eda.choreography.domain.message.ChoreographyMessage;
 import com.eda.choreography.domain.step.JoinRunner;
 import com.eda.choreography.domain.step.NextHopUnavailableException;
 import com.eda.choreography.domain.step.ServiceRunner;
+import com.eda.choreography.domain.step.StepRejectedException;
 import com.eda.choreography.domain.step.StepRunner;
+import com.eda.choreography.domain.step.UncertainOutcomeException;
 import java.time.Duration;
 import java.util.Objects;
 import java.util.function.Consumer;
@@ -33,7 +35,9 @@ import org.springframework.util.backoff.FixedBackOff;
  *
  * <p>A step that throws is retried twice, a second apart, and then fails: the runner records
  * the failure and the instance is undone or the failure goes to the join. If even that cannot
- * be published, the record is delivered again.
+ * be published, the record is delivered again. A step whose service refused the work
+ * ({@link StepRejectedException}) fails without being retried. One whose work may have happened
+ * ({@link UncertainOutcomeException}) is retried, and then recorded as uncertain, which has it undone.
  *
  * <p>A step whose next service takes no work yet ({@link NextHopUnavailableException}) is tried
  * again with a growing pause (half a second doubling up to five) for as long as the configured
@@ -77,6 +81,7 @@ public class StepContainerFactory {
                 runner.stepId(),
                 record -> runner.handle(record.value()),
                 record -> runner.fail(record.value()),
+                record -> runner.failUncertain(record.value()),
                 record -> runner.failNextHop(record.value()));
     }
 
@@ -86,6 +91,7 @@ public class StepContainerFactory {
      */
     public ConcurrentMessageListenerContainer<String, ChoreographyMessage> create(JoinRunner runner) {
         return messageContainer(runner.stepId(), forJoin(runner, runner::handle), forJoin(runner, runner::fail),
+                forJoin(runner, runner::failUncertain),
                 forJoin(runner, runner::failNextHop));
     }
 
@@ -97,6 +103,7 @@ public class StepContainerFactory {
         return messageContainer(runner.stepId(),
                 orTimeOut(runner::timeOut, runner::handle),
                 orTimeOut(runner::timeOut, runner::fail),
+                orTimeOut(runner::timeOut, runner::failUncertain),
                 orTimeOut(runner::timeOut, runner::failNextHop));
     }
 
@@ -141,9 +148,9 @@ public class StepContainerFactory {
         return container;
     }
 
-    private static boolean waitsForNextHop(Throwable exception) {
+    private static boolean causedBy(Throwable exception, Class<? extends Throwable> type) {
         for (var cause = exception; cause != null; cause = cause.getCause()) {
-            if (cause instanceof NextHopUnavailableException) {
+            if (type.isInstance(cause)) {
                 return true;
             }
         }
@@ -168,6 +175,7 @@ public class StepContainerFactory {
             String stepId,
             Consumer<ConsumerRecord<String, ChoreographyMessage>> handle,
             Consumer<ConsumerRecord<String, ChoreographyMessage>> giveUp,
+            Consumer<ConsumerRecord<String, ChoreographyMessage>> giveUpUncertain,
             Consumer<ConsumerRecord<String, ChoreographyMessage>> giveUpOnNextHop) {
         var properties = new ContainerProperties(StepTopics.inputTopic(stepId));
         properties.setGroupId(stepId);
@@ -178,10 +186,12 @@ public class StepContainerFactory {
         container.setBeanName("step-" + stepId);
         var errorHandler = new DefaultErrorHandler(
                 (record, exception) -> giveUpOn(stepId, cast(record), exception,
-                        waitsForNextHop(exception) ? giveUpOnNextHop : giveUp),
+                        causedBy(exception, NextHopUnavailableException.class) ? giveUpOnNextHop
+                                : causedBy(exception, UncertainOutcomeException.class) ? giveUpUncertain : giveUp),
                 RETRY_TWICE_A_SECOND_APART);
         errorHandler.setBackOffFunction((record, exception) ->
-                waitsForNextHop(exception) ? growingPauseUpTo5sFor(lateBindingWait) : null);
+                causedBy(exception, NextHopUnavailableException.class) ? growingPauseUpTo5sFor(lateBindingWait) : null);
+        errorHandler.addNotRetryableExceptions(StepRejectedException.class);
         container.setCommonErrorHandler(errorHandler);
         return container;
     }

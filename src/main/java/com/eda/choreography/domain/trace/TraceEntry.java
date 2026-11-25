@@ -29,10 +29,15 @@ public record TraceEntry(
         String resultRef) {
 
     /**
-     * Whether a step's effect happened. Only {@link #COMPLETED} steps have anything to undo.
+     * Whether a step's effect happened. Only {@link #COMPLETED} and {@link #UNCERTAIN} steps may
+     * have anything to undo.
      *
      * <p>Scope boundary: steps are assumed atomic, so {@link #FAILED} means no side effect was
-     * committed. A step that fails after a partial side effect is outside this model.
+     * committed.
+     *
+     * <p>{@link #UNCERTAIN} means the step gave up without learning whether its effect happened,
+     * such as a call whose answer never came. It fails the instance like a failure and is undone
+     * like a completed step; undoing work that never happened must be harmless.
      *
      * <p>{@link #SKIPPED} means the step never ran: it was inside a fork that had already failed,
      * so it did no work and handed the instance straight to the join.
@@ -40,7 +45,8 @@ public record TraceEntry(
     public enum Outcome {
         COMPLETED,
         FAILED,
-        SKIPPED
+        SKIPPED,
+        UNCERTAIN
     }
 
     public TraceEntry {
@@ -74,13 +80,23 @@ public record TraceEntry(
         return new TraceEntry(id, Set.of(parents), correlationId, stepId, stepId, Outcome.SKIPPED, null);
     }
 
+    /**
+     * A step that may have happened, of the service it is named after.
+     *
+     * @param resultRef the reference the step's result would have had, had it been seen
+     */
+    public static TraceEntry uncertain(
+            String id, String correlationId, String stepId, String resultRef, String... parents) {
+        return new TraceEntry(id, Set.of(parents), correlationId, stepId, stepId, Outcome.UNCERTAIN, resultRef);
+    }
+
     /** This entry, run by the given service. */
     public TraceEntry runBy(String service) {
         return new TraceEntry(id, parents, correlationId, stepId, service, outcome, resultRef);
     }
 
     public boolean needsCompensation() {
-        return outcome == Outcome.COMPLETED;
+        return outcome == Outcome.COMPLETED || outcome == Outcome.UNCERTAIN;
     }
 
     private static void requireText(String value, String name) {

@@ -149,6 +149,23 @@ public record ChoreographyMessage(
     }
 
     /**
+     * This message with a step appended that gave up without learning whether its work happened.
+     * It fails the instance, and unlike a failed entry it is undone.
+     *
+     * <p>Its {@code resultRef} is the id the entry would have had as completed, which names the
+     * run to the service ({@link #entryIdFor}), so the undo names the same run as the attempts.
+     * Its own id differs, because a redelivered copy of the message may still complete.
+     */
+    public ChoreographyMessage recordUncertain(String stepId, String service) {
+        var parents = currentLeafIds();
+        var id = entryId(stepId, parents, "|uncertain");
+        var nextTrace = new ArrayList<>(trace);
+        nextTrace.add(TraceEntry.uncertain(id, correlationId, stepId, entryIdFor(stepId), parents.toArray(String[]::new))
+                .runBy(service));
+        return new ChoreographyMessage(correlationId, flowName, input, nextTrace, results, null);
+    }
+
+    /**
      * The id the given step's entry gets if the step completes on this message. It names this
      * one run of the step: the same message always gives the same id, and a loop's next round
      * gives a new one.
@@ -197,9 +214,10 @@ public record ChoreographyMessage(
         return new ChoreographyMessage(correlationId, flowName, input, trace, results, step);
     }
 
-    /** Whether any step of this instance has failed. */
+    /** Whether any step of this instance has failed, or may have. */
     public boolean hasFailed() {
-        return trace.stream().anyMatch(entry -> entry.outcome() == TraceEntry.Outcome.FAILED);
+        return trace.stream().anyMatch(entry -> entry.outcome() == TraceEntry.Outcome.FAILED
+                || entry.outcome() == TraceEntry.Outcome.UNCERTAIN);
     }
 
     /** Whether any step of this instance was skipped because its fork had failed. */
@@ -210,8 +228,9 @@ public record ChoreographyMessage(
     /** The result of the given step, if it ran. Meant for linear paths, where a step runs at most once. */
     public Optional<Map<String, Object>> resultOf(String stepId) {
         return trace.stream()
-                .filter(entry -> entry.stepId().equals(stepId) && entry.resultRef() != null)
+                .filter(entry -> entry.stepId().equals(stepId) && entry.outcome() == TraceEntry.Outcome.COMPLETED)
                 .map(TraceEntry::resultRef)
+                .filter(ref -> ref != null && results.containsKey(ref))
                 .map(results::get)
                 .findFirst();
     }
