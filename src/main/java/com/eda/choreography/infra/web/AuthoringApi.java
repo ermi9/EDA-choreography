@@ -1,5 +1,6 @@
 package com.eda.choreography.infra.web;
 
+import com.eda.choreography.domain.compensation.CompensationPublisher;
 import com.eda.choreography.domain.plan.InvalidPlanException;
 import com.eda.choreography.domain.resolution.ServiceTable;
 import com.eda.choreography.domain.resolution.UnresolvedServiceException;
@@ -38,7 +39,9 @@ import org.springframework.web.bind.annotation.RestController;
  *   <li>{@code POST /api/flows/{name}/runs}: starts an instance with the JSON body as its input;
  *       202 with its correlation id;</li>
  *   <li>{@code GET /api/runs/{id}}: COMPLETED or COMPENSATED with the trace and results once the
- *       instance ended, RUNNING until then.</li>
+ *       instance ended, PARKED when an undo was given up on, RUNNING until then;</li>
+ *   <li>{@code POST /api/runs/{id}/undo}: has the parked undos of a run tried again; 202 with how
+ *       many there were, 404 when there were none.</li>
  * </ul>
  */
 @RestController
@@ -50,8 +53,11 @@ public class AuthoringApi {
     private final Flows flows;
     private final RunOutcomes outcomes;
     private final ServiceSpecs specs;
+    private final CompensationPublisher compensations;
 
-    public AuthoringApi(ServiceTable catalog, FlowStore store, Flows flows, RunOutcomes outcomes, ServiceSpecs specs) {
+    public AuthoringApi(ServiceTable catalog, FlowStore store, Flows flows, RunOutcomes outcomes, ServiceSpecs specs,
+                        CompensationPublisher compensations) {
+        this.compensations = compensations;
         this.catalog = catalog;
         this.specs = specs;
         this.store = store;
@@ -131,6 +137,16 @@ public class AuthoringApi {
             body.put("results", outcome.instance().results());
         }, () -> body.put("status", "RUNNING"));
         return body;
+    }
+
+    @PostMapping("/runs/{correlationId}/undo")
+    public ResponseEntity<Map<String, Object>> undoAgain(@PathVariable String correlationId) {
+        var parked = outcomes.takeParked(correlationId);
+        if (parked.isEmpty()) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", correlationId + " has no parked undo"));
+        }
+        parked.forEach(request -> compensations.publish(request.entry().service(), request));
+        return ResponseEntity.accepted().body(Map.of("retried", parked.size()));
     }
 
     private static Map<String, Object> entry(TraceEntry entry) {

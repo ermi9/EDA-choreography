@@ -41,7 +41,7 @@
   .success { color: var(--ok); }
   table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 8px; }
   td, th { text-align: left; padding: 4px; border-bottom: 1px solid var(--line); }
-  .FAILED { color: var(--bad); font-weight: 600; }
+  .FAILED, .UNCERTAIN, .PARKED { color: var(--bad); font-weight: 600; }
   .UNDONE { color: var(--undo); font-weight: 600; }
   .SKIPPED { color: var(--skip); }
   :root { --undo: #b54708; --skip: #98a2b3; }
@@ -377,6 +377,7 @@ $('run').onclick = async () => {
       await new Promise(resolve => setTimeout(resolve, 1000));
       const run = await api('GET', '/api/runs/' + encodeURIComponent(correlationId));
       if (run.status === 'COMPLETED') { showRun(run, []); return; }
+      if (run.status === 'PARKED') { showRun(run, []); offerUndoAgain(correlationId); return; }
       if (run.status === 'COMPENSATED') {
         const ids = run.trace.map(entry => entry.id).sort().join();
         if (!compensations.some(seen => seen.ids === ids)) {
@@ -390,6 +391,26 @@ $('run').onclick = async () => {
   } catch (e) { say('Run: ' + e.message, 'error'); }
 };
 
+function offerUndoAgain(correlationId) {
+  say(correlationId + ': an undo kept failing and is parked.', 'error');
+  const button = document.createElement('button');
+  button.textContent = 'Try the parked undo again';
+  button.onclick = async () => {
+    button.disabled = true;
+    try {
+      await api('POST', '/api/runs/' + encodeURIComponent(correlationId) + '/undo', '{}', 'application/json');
+      for (let attempt = 0; attempt < 120; attempt++) {
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        const run = await api('GET', '/api/runs/' + encodeURIComponent(correlationId));
+        if (run.status === 'COMPENSATED') { showRun(run, [run]); return; }
+        if (run.status === 'PARKED') { showRun(run, []); offerUndoAgain(correlationId); return; }
+      }
+      say(correlationId + ' is still being undone.', 'error');
+    } catch (e) { say('Undo: ' + e.message, 'error'); }
+  };
+  $('run-result').prepend(button);
+}
+
 // The stages a compensation undoes the trace in, as CompensationOrdering derives them: waves of
 // Kahn's algorithm on the reversed trace, leaving out failed entries and those already undone.
 function compensationStages(trace, alreadyUndone) {
@@ -399,7 +420,7 @@ function compensationStages(trace, alreadyUndone) {
   let wave = trace.filter(entry => children.get(entry.id) === 0);
   const stages = [];
   while (wave.length) {
-    const stage = wave.filter(entry => entry.outcome === 'COMPLETED' && !alreadyUndone.has(entry.id));
+    const stage = wave.filter(entry => ['COMPLETED', 'UNCERTAIN'].includes(entry.outcome) && !alreadyUndone.has(entry.id));
     if (stage.length) { stages.push(stage); }
     const next = [];
     wave.forEach(entry => entry.parents.forEach(parent => {
@@ -457,6 +478,7 @@ function showRun(run, compensations) {
     const undone = runs.map(entry => undoneAt.get(entry.id)).filter(Boolean)
         .map(at => at.stage + (rounds.length > 1 ? ' (' + at.round + ')' : ''));
     if (runs.some(entry => entry.outcome === 'FAILED')) { paint(step, 'failed', '✗ failed' + times); }
+    else if (runs.some(entry => entry.outcome === 'UNCERTAIN')) { paint(step, 'failed', '? uncertain' + (undone.length ? ', undone · stage ' + undone.join(', ') : '') + times); }
     else if (undone.length) { paint(step, 'undone', '↶ undone · stage ' + undone.join(', ') + times); }
     // Skipped only when no run of the step did any work: its fork had already failed.
     else if (runs.every(entry => entry.outcome === 'SKIPPED')) { paint(step, 'skipped', '⤼ skipped' + times); }

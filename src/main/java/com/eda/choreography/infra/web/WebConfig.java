@@ -1,5 +1,6 @@
 package com.eda.choreography.infra.web;
 
+import com.eda.choreography.domain.compensation.CompensationRequest;
 import com.eda.choreography.domain.message.ChoreographyMessage;
 import com.eda.choreography.domain.resolution.ServiceTable;
 import java.time.Clock;
@@ -58,6 +59,26 @@ public class WebConfig {
         });
         var container = new ConcurrentMessageListenerContainer<>(messages, properties);
         container.setBeanName("run-outcomes");
+        return container;
+    }
+
+    /** The undo requests nobody could carry out, so a parked run is shown and can be tried again. */
+    @Bean
+    @ConditionalOnProperty(name = "choreography.runs.listen-enabled", havingValue = "true", matchIfMissing = true)
+    ConcurrentMessageListenerContainer<String, CompensationRequest> parkedUndosListener(
+            ConsumerFactory<String, CompensationRequest> requests,
+            RunOutcomes outcomes,
+            @Value("${choreography.kafka.compensation-failed-topic}") String failedTopic,
+            @Value("${spring.application.name}") String applicationName) {
+        var properties = new ContainerProperties(failedTopic);
+        properties.setGroupId(applicationName + "-parked-" + UUID.randomUUID());
+        properties.setMessageListener((MessageListener<String, CompensationRequest>) record -> {
+            if (record.value() != null) {
+                outcomes.park(record.value());
+            }
+        });
+        var container = new ConcurrentMessageListenerContainer<>(requests, properties);
+        container.setBeanName("parked-undos");
         return container;
     }
 }
