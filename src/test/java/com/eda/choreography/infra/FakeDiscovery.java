@@ -63,12 +63,23 @@ public final class FakeDiscovery implements AutoCloseable {
         send("STATUS_CHANGED", serviceName, "healthy", 2, serviceName + ".in", serviceName + ".compensate", openapiUrl);
     }
 
+    /** Registers the service at an address of its own and reports it healthy. */
+    public void registerHealthyAt(String serviceName, String url, String openapiUrl) {
+        send("SERVICE_REGISTERED", serviceName, "unknown", 1, serviceName + ".in", serviceName + ".compensate", url, openapiUrl);
+        send("STATUS_CHANGED", serviceName, "healthy", 2, serviceName + ".in", serviceName + ".compensate", url, openapiUrl);
+    }
+
     private void send(String type, String serviceName, String status, long generation,
                       String inputTopic, String compensationTopic, String openapiUrl) {
+        send(type, serviceName, status, generation, inputTopic, compensationTopic, "http://" + serviceName + ":8080", openapiUrl);
+    }
+
+    private void send(String type, String serviceName, String status, long generation,
+                      String inputTopic, String compensationTopic, String url, String openapiUrl) {
         var event = new LinkedHashMap<String, Object>();
         event.put("type", type);
         event.put("serviceName", serviceName);
-        event.put("url", "http://" + serviceName + ":8080");
+        event.put("url", url);
         event.put("openapiUrl", openapiUrl);
         event.put("status", status);
         event.put("timestamp", LocalDateTime.now().toString());
