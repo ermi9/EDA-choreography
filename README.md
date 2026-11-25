@@ -3,7 +3,11 @@
 This repository is the runtime half of my thesis. I am building a **decentralized
 choreography engine** for event-driven microservices. A workflow is drawn as a BPMN diagram,
 translated once into an internal plan, and then executed over Kafka **with no central
-orchestrator**. Each service does its step, decides where the work goes next, and hands it on.
+orchestrator**. Each participant does its step, decides where the work goes next, and hands it on.
+
+A *participant* is a service together with its *driver*, the part of this engine that does the
+choreography work for it. [The driver](#the-driver) says what that means for the claim above, and
+what I will change.
 
 The other half is a service discovery platform (`microservice-discovery-k8s`). I treat it as a
 black box: the engine only consumes its `service-events` Kafka stream through its own DTO, and
@@ -59,8 +63,8 @@ are undone first, in either order. A is undone last, because both B and C depend
 
 I implement choreography with a variant of the **routing slip** pattern. In the classic
 pattern, the message carries the list of steps it still has to visit. Mine carries a pointer
-to *where it may go* (the flow) and a record of *where it has been* (the trace). Each service
-works out the next hop itself, from its own result.
+to *where it may go* (the flow) and a record of *where it has been* (the trace). Each participant
+works out the next hop from its own result; the driver does this for its service.
 
 ```mermaid
 classDiagram
@@ -75,7 +79,7 @@ classDiagram
         id
         parents : set of ids
         stepId : the service that ran
-        outcome : COMPLETED or FAILED
+        outcome : COMPLETED, FAILED, SKIPPED or UNCERTAIN
         resultRef
     }
     ChoreographyMessage "1" o-- "*" TraceEntry
@@ -96,8 +100,9 @@ Each design choice in the message serves one purpose:
 
 ## How a flow runs
 
-Every service runs the same small loop: consume, do the step, append to the trace, decide the
-next hop, publish. There is no orchestrator in the picture.
+Every participant runs the same small loop: consume, do the step, append to the trace, decide the
+next hop, publish. The service does the step, and its driver does the rest. There is no
+orchestrator in the picture.
 
 ```mermaid
 sequenceDiagram
@@ -196,7 +201,7 @@ flowchart LR
         P["BpmnPlanner<br/>parses BPMN XML into a PlanModel<br/>validates names against the catalog"]
     end
     subgraph Runtime["Runtime (Kafka)"]
-        R["each service: consume, do step,<br/>evaluate condition on its own result,<br/>resolve target via discovery, publish"]
+        R["each participant: consume, do step,<br/>evaluate condition on its own result,<br/>resolve target via discovery, publish"]
     end
     D[("discovery<br/>service-events")]
     E -- export XML --> S --> P --> R
@@ -215,22 +220,22 @@ flowchart LR
 
    Names discovery knows are bound. Unknown names are either late-bound, resolved at runtime
    if the service ever appears, or rejected when the plan is structurally invalid.
-3. **Run.** A request names a flow, and the services choreograph it over Kafka. Each one
+3. **Run.** A request names a flow, and the participants choreograph it over Kafka. Each one
    evaluates the outgoing conditions against its own result, resolves the next service's
    topic through discovery, and publishes.
 
 ## Any service, in any language
 
 A service takes part by implementing four HTTP endpoints and registering with discovery. The
-engine takes it up from discovery's stream, reads its Kafka topics for it, and calls it to do a
-step or undo one. See [contract/](contract/README.md), and
+engine's driver takes it up from discovery's stream, reads its Kafka topics for it, and calls it
+to do a step or undo one. See [contract/](contract/README.md), and
 [sample-services](https://github.com/ermi9/sample-services) for worked examples.
 
 ```mermaid
 sequenceDiagram
     participant S as your service (HTTP)
     participant D as discovery
-    participant E as engine
+    participant E as driver (in the engine)
     S->>D: POST /register
     D-->>E: service-events
     E->>S: GET its OpenAPI document (declares the contract?)
@@ -241,6 +246,67 @@ sequenceDiagram
 Over HTTP a step can do its work and the answer can still be lost. Such a step is recorded as
 `UNCERTAIN` after its retries: it fails the run like a failure, and is undone like a completed
 step, under the same key. A service that remembers keys can undo it whether or not it happened.
+
+## The driver
+
+A service that only speaks HTTP cannot read Kafka, carry a trace or route. The driver does that
+for it, so nobody has to write joins and compensation again in their own language.
+
+| The service | Its driver |
+|---|---|
+| does the step, and undoes it | reads `<service>.in` and `<service>.compensate` |
+| remembers the keys it has seen | calls the service with the key of the run, and retries |
+| answers `/health` and serves its OpenAPI document | records the step in the trace as completed, failed, uncertain or skipped |
+| registers with discovery | picks the next step from the step's own result and the plan, and publishes to it |
+| | waits at joins, and works out the undo order from the trace |
+
+**Why this is still choreography.** No driver steers a run from start to finish. Each service has
+consumers of its own, which decide only that service's next hop, from the message and the plan.
+They hand on through Kafka and never call each other. A run's history travels in its message.
+
+**What it costs today.** One engine process can drive many services, and on the Azure deployment
+one drives all the HTTP services. The decisions are decentralized, but that deployment is not:
+
+- if that process stops, all the services it drives stop taking work, and their messages wait in
+  Kafka;
+- the HTTP services do not route their own messages, their driver does;
+- every engine that takes up services takes up all of them. It cannot yet be told which.
+
+Join state and the stored plans are in one Redis, however the drivers are deployed.
+
+```mermaid
+flowchart TB
+    subgraph now["Now: one driver process for all of them"]
+        K1[(Kafka)] <--> D["driver"]
+        D -->|HTTP| I1[inventory]
+        D -->|HTTP| P1[payment]
+        D -->|HTTP| S1[shipping]
+        D -->|HTTP| O1[orders]
+    end
+```
+
+```mermaid
+flowchart TB
+    subgraph planned["Planned: one driver per service"]
+        K2[(Kafka)] <--> DI[driver]
+        K2 <--> DP[driver]
+        K2 <--> DS[driver]
+        K2 <--> DO[driver]
+        DI -->|HTTP| I2[inventory]
+        DP -->|HTTP| P2[payment]
+        DS -->|HTTP| S2[shipping]
+        DO -->|HTTP| O2[orders]
+    end
+```
+
+**What I will change** (planned, not built yet):
+
+1. A setting that names the services a driver takes up. Without it, a driver takes up all of them,
+   which stays the easy way to try a service of one's own.
+2. One driver beside each service in the deployment. A service and its driver then run as one
+   participant, and the engine that serves the editor drives none.
+3. A showcase case that stops one driver in the middle of a run. It checks that the other
+   participants keep working, and that the run goes on when the driver is back.
 
 ## Scope
 
