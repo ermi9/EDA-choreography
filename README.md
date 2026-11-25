@@ -219,6 +219,29 @@ flowchart LR
    evaluates the outgoing conditions against its own result, resolves the next service's
    topic through discovery, and publishes.
 
+## Any service, in any language
+
+A service takes part by implementing four HTTP endpoints and registering with discovery. The
+engine takes it up from discovery's stream, reads its Kafka topics for it, and calls it to do a
+step or undo one. See [contract/](contract/README.md), and
+[sample-services](https://github.com/ermi9/sample-services) for worked examples.
+
+```mermaid
+sequenceDiagram
+    participant S as your service (HTTP)
+    participant D as discovery
+    participant E as engine
+    S->>D: POST /register
+    D-->>E: service-events
+    E->>S: GET its OpenAPI document (declares the contract?)
+    E->>S: POST /choreography/steps/{step}
+    E->>S: POST /choreography/undo/{step}
+```
+
+Over HTTP a step can do its work and the answer can still be lost. Such a step is recorded as
+`UNCERTAIN` after its retries: it fails the run like a failure, and is undone like a completed
+step, under the same key. A service that remembers keys can undo it whether or not it happened.
+
 ## Scope
 
 **In scope:**

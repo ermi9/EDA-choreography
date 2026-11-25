@@ -1,0 +1,65 @@
+openapi: 3.0.3
+info:
+  title: Choreography participant contract
+  version: "1"
+  description: >
+    What an HTTP service implements to take part in choreographies. Both operations carry an
+    Idempotency-Key, and an undo carries the key of the step it undoes. See README.md.
+paths:
+  /health:
+    get:
+      summary: Up while the service can take work; discovery probes it
+      responses:
+        "200": { description: the service is up }
+  /choreography/steps/{step}:
+    post:
+      summary: Do a step
+      parameters:
+        - { name: step, in: path, required: true, schema: { type: string } }
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [correlationId, flowName, step, visit, input, results]
+              properties:
+                correlationId: { type: string, description: the run }
+                flowName: { type: string }
+                step: { type: string }
+                visit: { type: integer, description: "which time this step runs in the run, from 1; above 1 in a loop" }
+                input: { type: object, description: what the run was started with }
+                results: { type: object, description: "what earlier steps answered, by step; the latest answer of each" }
+      responses:
+        "200":
+          description: Done. The body is the step's result, which conditions can test. The same key gets the same answer.
+          content: { application/json: { schema: { type: object } } }
+        "409": { description: This key was already undone, so it must not be done. The step fails. }
+        "422": { description: "Refused, and nothing was committed. The step fails without a retry and is not undone." }
+        "5XX": { description: Not known whether it was done. Retried under the same key; if given up on, it is undone. }
+  /choreography/undo/{step}:
+    post:
+      summary: Undo a step
+      description: >
+        Must succeed when repeated, and when the step was never done: the key is then remembered,
+        so that an attempt that arrives late is answered 409.
+      parameters:
+        - { name: step, in: path, required: true, schema: { type: string } }
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [correlationId, flowName, step, input]
+              properties:
+                correlationId: { type: string }
+                flowName: { type: string }
+                step: { type: string }
+                input: { type: object }
+                result: { type: object, nullable: true, description: "what the step answered; null when its answer was never seen" }
+      responses:
+        "2XX": { description: Undone. }
+        default: { description: "Not undone. Retried, then parked for a person; earlier steps wait." }

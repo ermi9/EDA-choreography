@@ -46,10 +46,19 @@ services:
       SPRING_DATA_REDIS_HOST: redis
       HEALTHCHECK_INTERVALMS: 5000
       JAVA_TOOL_OPTIONS: -Xmx320m -XX:+UseSerialGC
+    # For services on this machine only: a registered address is called by the engine.
+    ports: ["127.0.0.1:${DISCOVERY_PORT:-8081}:8080"]
+    extra_hosts: ["host.docker.internal:host-gateway"]
 
-  # The editor and the API, on port 80. It loads the flows in ./flows at startup.
+  # The editor and the API, on port 80. It loads the flows in ./flows at startup, and takes up
+  # services that implement the participant contract (../contract).
   engine:
     <<: *engine
+    environment:
+      <<: *engine-env
+      PARTICIPANTS: "true"
+      CHOREOGRAPHY_COMPENSATION_RETRYFOR: ${COMPENSATION_RETRY_FOR:-5m}
+    extra_hosts: ["host.docker.internal:host-gateway"]
     ports: ["${PORT:-80}:8080"]
     volumes: [./flows:/flows:ro]
 
