@@ -65,7 +65,7 @@
   <h1>Choreography flow editor</h1>
   <p class="hint">Draw tasks, exclusive gateways (choices) and parallel gateways (fork and join). Pick each task's service from the catalog. Then save the flow and run it.</p>
 
-  <h2>Demo scenarios</h2>
+  <h2>Scenarios</h2>
   <div class="row"><select id="scenario"></select><button class="secondary" id="load-scenario">Load</button></div>
   <p class="hint" id="scenario-note"></p>
 
@@ -303,8 +303,30 @@ $('load').onclick = async () => {
   } catch (e) { say('Load: ' + e.message, 'error'); }
 };
 
+// Flows of the sample services (ermi9/sample-services), offered only when the engine has them stored.
+const realScenarios = [
+  { flow: 'order-with-giftwrap-installments-and-parallel-delivery', title: 'all in one: the last step fails, everything is undone', input: { customer: 'ada', sku: 'pen', quantity: 2, city: 'Graz', installments: 2, faults: [{ at: 'Task_loyalty_bonus', kind: 'error' }] }, note: 'The bonus is uncertain, since an error does not say whether the work was done, so it is undone first. Then the order, both branches, the points, both installments and the stock.' },
+  { flow: 'order-with-giftwrap-installments-and-parallel-delivery', title: 'all in one: no courier, undo', input: { customer: 'ada', sku: 'pen', quantity: 2, city: 'Atlantis', installments: 2 }, note: 'No courier serves Atlantis. What ran on the other branch is undone, then the points, both installments and the stock.' },
+  { flow: 'order-with-giftwrap-installments-and-parallel-delivery', title: 'all in one: loop hits its limit, undo', input: { customer: 'ada', sku: 'pen', quantity: 7, installments: 7 }, note: 'Seven installments where five are allowed. All five charges are undone, then the stock.' },
+  { flow: 'order-with-giftwrap-installments-and-parallel-delivery', title: 'all in one: second installment fails, undo', input: { customer: 'ada', sku: 'pen', quantity: 2, installments: 3, faults: [{ at: 'Task_charge', kind: 'error', visit: 2 }] }, note: 'The second charge is uncertain, so it is undone too, then the first, then the stock.' },
+  { flow: 'order-with-giftwrap-installments-and-parallel-delivery', title: 'all in one: the reply to the charge is lost, undo', input: { customer: 'ada', sku: 'pen', quantity: 2, faults: [{ at: 'Task_charge', kind: 'lost-reply' }] }, note: 'The charge is made but never confirmed. It is uncertain, and undone. Takes about 30 s.' },
+  { flow: 'order-with-giftwrap-installments-and-parallel-delivery', title: 'all in one: a late branch misses the join, undo', input: { customer: 'ada', sku: 'pen', quantity: 2, faults: [{ at: 'Task_book', kind: 'slow', ms: 9000 }] }, note: 'The courier takes 9 s and the join waits 6 s. The join gives up, and the late branch undoes its own booking.' },
+  { flow: 'order-with-giftwrap-installments-and-parallel-delivery', title: 'all in one: giftwrap never comes, undo', input: { customer: 'ada', sku: 'lamp', quantity: 10 }, note: 'A large order needs the giftwrap service. If nobody registers it within 30 s, the stock goes back.' },
+  { flow: 'order-with-giftwrap-installments-and-parallel-delivery', title: 'all in one: an undo keeps failing and is parked', input: { customer: 'ada', sku: 'pen', quantity: 2, faults: [{ at: 'Task_loyalty_bonus', kind: 'error' }, { at: 'Task_book', kind: 'undo-error', times: 6 }] }, note: 'Undoing the courier fails for 20 s, so after about 35 s the run is parked and the steps before it wait. Then press "try the parked undo again" below.' },
+  { flow: 'order-with-giftwrap-installments-and-parallel-delivery', title: 'all in one: everything succeeds', input: { customer: 'ada', sku: 'pen', quantity: 2, city: 'Graz', installments: 2 }, note: 'Two installments, and a second courier for Graz.' },
+  { flow: 'charge-and-reward-then-ship-then-aftercare-two-forks', title: 'two forks in a row: the last step fails, undo', input: { customer: 'ada', sku: 'pen', quantity: 2, faults: [{ at: 'orders', kind: 'error' }] }, note: 'The second fork is undone, then the courier, then the first fork, then the stock.' },
+  { flow: 'charge-and-reward-then-ship-then-aftercare-two-forks', title: 'two forks in a row: eve cannot pay, undo', input: { customer: 'eve', sku: 'pen', quantity: 2 }, note: 'The charge is refused in the first fork. The second fork is never reached.' },
+  { flow: 'charge-and-reward-then-ship-then-aftercare-two-forks', title: 'two forks in a row: everything succeeds', input: { customer: 'ada', sku: 'pen', quantity: 2 }, note: 'Both joins fire once.' },
+  { flow: 'checkout', title: 'checkout: no courier, undo', input: { customer: 'ada', sku: 'pen', quantity: 2, city: 'Atlantis' }, note: 'No courier serves Atlantis. The charge on the other branch is undone, then the stock.' },
+  { flow: 'checkout', title: 'checkout: the order is not confirmed, undo', input: { customer: 'ada', sku: 'pen', quantity: 2, faults: [{ at: 'orders', kind: 'error' }] }, note: 'The step after the join fails. Both branches are undone, then the stock.' },
+  { flow: 'checkout', title: 'checkout: everything succeeds', input: { customer: 'ada', sku: 'pen', quantity: 2, city: 'Graz' }, note: 'Charge and points run while the courier is booked.' },
+  { flow: 'installments', title: 'installments: loop hits its limit, undo', input: { customer: 'ada', sku: 'pen', quantity: 7, installments: 7 }, note: 'Every charge is undone, latest first, then the stock.' },
+  { flow: 'pickup', title: 'pickup: eve cannot pay, undo', input: { customer: 'eve', sku: 'pen', quantity: 2 }, note: 'A refusal is not retried. The stock goes back.' },
+  { flow: 'gift', title: 'gift: giftwrap never comes, undo', input: { customer: 'ada', sku: 'pen', quantity: 2 }, note: 'The flow waits 30 s for a service nobody registered, then the stock goes back.' }
+];
+
 // Flows in deploy/flows, each with a request that shows one behaviour of the runtime.
-const scenarios = [
+const demoScenarios = [
   { flow: 'order', title: 'order: large order is reviewed', input: { amount: 5000 }, note: 'The choice after assess takes the review path; pay and ship run in parallel and join at confirm.' },
   { flow: 'order', title: 'order: small order skips review', input: { amount: 20 }, note: 'The condition #result[\'amount\'] > 1000 is false, so the default path goes straight to reserve.' },
   { flow: 'order', title: 'order: ship fails, undo', input: { amount: 20, failAt: 'ship' }, note: 'ship fails inside the fork. The join hears of it, then pay, reserve and assess are undone in reverse order.' },
@@ -333,7 +355,21 @@ const scenarios = [
   { flow: 'showcase', title: 'showcase: gift needs a service nobody runs', input: { amount: 20, gift: true }, note: 'wrap is late-bound and never registers. confirm waits 30 s for it, then wrap counts as failed and everything is undone.' }
 ];
 
-scenarios.forEach((scenario, i) => $('scenario').append(new Option(scenario.title, i)));
+let scenarios = [];
+
+async function offerScenarios() {
+  const stored = await api('GET', '/api/flows');
+  for (const [label, group] of [['Real services', realScenarios], ['Demo services', demoScenarios]]) {
+    const offered = group.filter(scenario => stored.includes(scenario.flow));
+    if (!offered.length) { continue; }
+    const options = document.createElement('optgroup');
+    options.label = label;
+    offered.forEach((scenario, i) => options.append(new Option(scenario.title, scenarios.length + i)));
+    $('scenario').append(options);
+    scenarios = scenarios.concat(offered);
+  }
+}
+
 $('scenario').onchange = () => { $('scenario-note').textContent = scenarios[$('scenario').value].note; };
 
 async function loadScenario(scenario) {
@@ -502,8 +538,7 @@ function showRun(run, compensations) {
 
 loadCatalog();
 loadStoredNames();
-$('scenario-note').textContent = scenarios[0].note;
-newDiagram().then(() => loadScenario(scenarios[0])).catch(() => say('Draw a flow, or load a stored one.'));
+newDiagram().then(offerScenarios).then(() => loadScenario(scenarios[0])).catch(() => say('Draw a flow, or load a stored one.'));
 setInterval(loadCatalog, 10000);
 </script>
 </body>
