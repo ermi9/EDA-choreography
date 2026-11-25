@@ -35,7 +35,7 @@ public final class ServiceTable implements ResolutionSource {
         }
         switch (event.type()) {
             case ServiceEvent.REGISTERED -> services.put(event.serviceName(), Entry.of(event, false, null));
-            case ServiceEvent.DEREGISTERED -> services.put(event.serviceName(), Entry.of(event, true, null));
+            case ServiceEvent.DEREGISTERED -> services.put(event.serviceName(), Entry.of(event, true, services.get(event.serviceName())));
             case ServiceEvent.STATUS_CHANGED -> services.compute(event.serviceName(), (name, known) ->
                     known == null || (!known.deregistered && event.generation() >= known.generation)
                             ? Entry.of(event, false, known)
@@ -69,6 +69,14 @@ public final class ServiceTable implements ResolutionSource {
                 .map(Entry::openapiUrl);
     }
 
+    /**
+     * Where the service answers, as it registered with discovery. Kept after it deregistered, so
+     * that a step it ran can still be undone there.
+     */
+    public Optional<String> url(String serviceName) {
+        return Optional.ofNullable(services.get(serviceName)).map(Entry::url);
+    }
+
     @Override
     public Optional<Resolution> resolve(String serviceName) {
         return Optional.ofNullable(services.get(serviceName)).map(Entry::resolution);
@@ -86,20 +94,22 @@ public final class ServiceTable implements ResolutionSource {
         return value != null && !value.isBlank();
     }
 
-    private record Entry(Resolution resolution, long generation, boolean deregistered, String openapiUrl) {
+    private record Entry(Resolution resolution, long generation, boolean deregistered, String url, String openapiUrl) {
 
         /**
-         * The entry an event leaves. A status change that does not name the spec keeps the one
+         * The entry an event leaves. An event that does not name the url or spec keeps the one
          * the service registered with ({@code known}); a registration names its own or none.
          */
         static Entry of(ServiceEvent event, boolean deregistered, Entry known) {
             var live = !deregistered && ServiceEvent.HEALTHY.equals(event.status());
             var openapiUrl = hasText(event.openapiUrl()) ? event.openapiUrl()
                     : known == null ? null : known.openapiUrl();
+            var url = hasText(event.url()) ? event.url() : known == null ? null : known.url();
             return new Entry(
                     new Resolution(event.inputTopic(), event.compensationTopic(), live),
                     event.generation(),
                     deregistered,
+                    url,
                     deregistered ? null : openapiUrl);
         }
     }
